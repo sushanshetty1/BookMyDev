@@ -86,3 +86,21 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes electron-orbit {
+  from {
+    transform: rotate(0deg) scale(1, 0.6);
+  }
+  to {
+    transform: rotate(360deg) scale(1, 0.6);
+  }
+}
+
+@keyframes electron-spin {
+  from {
+    transform: translateX(-50%) rotate(0deg);
+  }
+  to {
+    transform: translateX(-50%) rotate(360deg);
+  }
+}

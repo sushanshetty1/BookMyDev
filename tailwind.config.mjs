@@ -10,7 +10,11 @@ export default {
   	extend: {
 		fontFamily: {
 			sans: ['var(--font-inter)'],
-		  },
+		},
+		animation: {
+			'electron-orbit': 'electron-orbit 1.5s linear infinite',
+			'electron-spin': 'electron-spin 1.5s linear infinite',
+		},
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
