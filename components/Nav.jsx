@@ -143,9 +143,9 @@ const UserMenu = memo(({ user, userType, isOffline, handleSignOut, getInitials }
       <DropdownMenuSeparator className="my-2" />
       
       <DropdownMenuItem asChild className="hover:bg-accent">
-        <Link href="/profile" className="flex items-center gap-2 py-2">
-          <User className="h-4 w-4" />
-          <span>Profile</span>
+        <Link href="/ManageWallet" className="flex items-center gap-2 py-2">
+          <Settings className="h-4 w-4" />
+          <span>Manage Wallet</span>
         </Link>
       </DropdownMenuItem>
       
@@ -178,6 +178,17 @@ const UserMenu = memo(({ user, userType, isOffline, handleSignOut, getInitials }
   </DropdownMenu>
 ));
 
+const NavigationItem = memo(({ href, icon: Icon, label, onClick }) => (
+  <Link 
+    href={href} 
+    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-accent transition-colors"
+    onClick={onClick}
+  >
+    <Icon className="h-5 w-5 text-muted-foreground" />
+    <span className="text-base font-medium">{label}</span>
+  </Link>
+));
+
 const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setIsSheetOpen, getInitials }) => (
   <div className="flex flex-col h-full">
     <SheetHeader className="p-6 border-b">
@@ -190,38 +201,38 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
     <div className="flex-1 overflow-y-auto">
       <div className="flex flex-col p-4">
         {user && (
-          <div className="flex items-center space-x-4 p-4 mb-4 bg-accent rounded-lg">
-            <div className="relative">
-              <Avatar className="h-12 w-12 ring-2 ring-blue-500">
-                <AvatarImage src={user?.photoURL} alt={user?.displayName} />
-                <AvatarFallback>{getInitials(user?.displayName)}</AvatarFallback>
-              </Avatar>
-              {userType === 'developer' && (
-                <div className="absolute inset-0">
-                  <div className="absolute inset-0 animate-[spin_8s_linear_infinite]">
-                    <Code2 
-                      className="absolute h-4 w-4 text-blue-500 animate-pulse"
-                      style={{
-                        top: '-8px',
-                        left: '50%',
-                        transform: 'translateX(-50%) rotate(-90deg)'
-                      }}
-                    />
+          <div className="flex items-center p-4 mb-4 bg-accent rounded-lg">
+            <div className="flex items-start space-x-4 w-full">
+              <div className="relative flex-shrink-0">
+                <Avatar className="h-12 w-12 ring-2 ring-blue-500">
+                  <AvatarImage src={user?.photoURL} alt={user?.displayName} />
+                  <AvatarFallback>{getInitials(user?.displayName)}</AvatarFallback>
+                </Avatar>
+                {userType === 'developer' && (
+                  <div className="absolute inset-0">
+                    <div className="absolute inset-0 animate-[spin_8s_linear_infinite]">
+                      <Code2 
+                        className="absolute h-4 w-4 text-blue-500 animate-pulse"
+                        style={{
+                          top: '-8px',
+                          left: '50%',
+                          transform: 'translateX(-50%) rotate(-90deg)'
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col">
-              <span className="font-medium">{user?.displayName || user?.email}</span>
-              {user?.displayName && (
-                <span className="text-sm text-muted-foreground">{user?.email}</span>
-              )}
-              {userType && (
-                <span className="text-sm font-medium text-blue-600 flex items-center gap-1">
-                  <Code2 className="h-3 w-3" />
-                  {userType.charAt(0).toUpperCase() + userType.slice(1)}
-                </span>
-              )}
+                )}
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="font-medium truncate">{user?.displayName || 'User'}</span>
+                <span className="text-sm text-muted-foreground truncate">{user?.email}</span>
+                {userType && (
+                  <span className="text-sm font-medium text-blue-600 flex items-center gap-1 mt-1">
+                    <Code2 className="h-3 w-3" />
+                    {userType.charAt(0).toUpperCase() + userType.slice(1)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -231,12 +242,20 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
           <NavigationItem href="/Developers" icon={Users} label="Developers" onClick={() => setIsSheetOpen(false)} />
           
           {user && (userType === 'developer' ? (
-            <NavigationItem 
-              href="/WorkDashboard" 
-              icon={Layout} 
-              label="Work Dashboard" 
-              onClick={() => setIsSheetOpen(false)} 
-            />
+            <>
+              <NavigationItem 
+                href="/WorkDashboard" 
+                icon={Layout} 
+                label="Work Dashboard" 
+                onClick={() => setIsSheetOpen(false)} 
+              />
+              <NavigationItem 
+                href="/manage-wallet" 
+                icon={Settings} 
+                label="Manage Wallet" 
+                onClick={() => setIsSheetOpen(false)} 
+              />
+            </>
           ) : (
             <NavigationItem 
               href="/become-developer" 
@@ -276,17 +295,6 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
       )}
     </div>
   </div>
-));
-
-const NavigationItem = memo(({ href, icon: Icon, label, onClick }) => (
-  <Link 
-    href={href} 
-    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-accent transition-colors"
-    onClick={onClick}
-  >
-    <Icon className="h-5 w-5 text-muted-foreground" />
-    <span className="text-base font-medium">{label}</span>
-  </Link>
 ));
 
 const Nav = () => {
