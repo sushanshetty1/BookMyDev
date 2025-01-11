@@ -2,7 +2,7 @@
 import React, { useEffect, useState, memo } from 'react';
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Menu, Sun, Moon, Code2, User, LogOut, Settings, Laptop, WifiOff, Home, InfoIcon, Users, Mail } from "lucide-react";
+import { Menu, Sun, Moon, Code2, User, LogOut, Settings, Laptop, WifiOff, Home, InfoIcon, Users, Mail, Layout, Rocket } from "lucide-react";
 import { useTheme } from "next-themes";
 import { auth } from '../firebase';
 import { db } from '../firebase';
@@ -149,13 +149,22 @@ const UserMenu = memo(({ user, userType, isOffline, handleSignOut, getInitials }
         </Link>
       </DropdownMenuItem>
       
-      <DropdownMenuItem asChild className="hover:bg-accent">
-        <Link href="/settings" className="flex items-center gap-2 py-2">
-          <Settings className="h-4 w-4" />
-          <span>Settings</span>
-        </Link>
-      </DropdownMenuItem>
-
+      {userType === 'developer' ? (
+        <DropdownMenuItem asChild className="hover:bg-accent">
+          <Link href="/WorkDashboard" className="flex items-center gap-2 py-2">
+            <Layout className="h-4 w-4" />
+            <span>Work Dashboard</span>
+          </Link>
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem asChild className="hover:bg-accent">
+          <Link href="/become-developer" className="flex items-center gap-2 py-2">
+            <Rocket className="h-4 w-4" />
+            <span>Become a Developer</span>
+          </Link>
+        </DropdownMenuItem>
+      )}
+      
       <DropdownMenuSeparator className="my-2" />
       
       <DropdownMenuItem 
@@ -167,17 +176,6 @@ const UserMenu = memo(({ user, userType, isOffline, handleSignOut, getInitials }
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
-));
-
-const NavigationItem = memo(({ href, icon: Icon, label, onClick }) => (
-  <Link 
-    href={href} 
-    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-accent transition-colors"
-    onClick={onClick}
-  >
-    <Icon className="h-5 w-5 text-muted-foreground" />
-    <span className="text-base font-medium">{label}</span>
-  </Link>
 ));
 
 const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setIsSheetOpen, getInitials }) => (
@@ -210,16 +208,6 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
                       }}
                     />
                   </div>
-                  <div className="absolute inset-0 animate-[spin_12s_linear_infinite]">
-                    <Code2 
-                      className="absolute h-4 w-4 text-green-500 animate-pulse"
-                      style={{
-                        top: '50%',
-                        right: '-8px',
-                        transform: 'translateY(-50%) rotate(0deg)'
-                      }}
-                    />
-                  </div>
                 </div>
               )}
             </div>
@@ -240,9 +228,23 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
         
         <div className="space-y-1">
           <NavigationItem href="/" icon={Home} label="Home" onClick={() => setIsSheetOpen(false)} />
-          <NavigationItem href="/About" icon={InfoIcon} label="About" onClick={() => setIsSheetOpen(false)} />
-          <NavigationItem href="/developers" icon={Users} label="Developers" onClick={() => setIsSheetOpen(false)} />
-          <NavigationItem href="/contact" icon={Mail} label="Contact" onClick={() => setIsSheetOpen(false)} />
+          <NavigationItem href="/Developers" icon={Users} label="Developers" onClick={() => setIsSheetOpen(false)} />
+          
+          {user && (userType === 'developer' ? (
+            <NavigationItem 
+              href="/WorkDashboard" 
+              icon={Layout} 
+              label="Work Dashboard" 
+              onClick={() => setIsSheetOpen(false)} 
+            />
+          ) : (
+            <NavigationItem 
+              href="/become-developer" 
+              icon={Rocket} 
+              label="Become a Developer" 
+              onClick={() => setIsSheetOpen(false)} 
+            />
+          ))}
         </div>
 
         <div className="mt-6 p-4 border-t">
@@ -274,6 +276,17 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
       )}
     </div>
   </div>
+));
+
+const NavigationItem = memo(({ href, icon: Icon, label, onClick }) => (
+  <Link 
+    href={href} 
+    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-accent transition-colors"
+    onClick={onClick}
+  >
+    <Icon className="h-5 w-5 text-muted-foreground" />
+    <span className="text-base font-medium">{label}</span>
+  </Link>
 ));
 
 const Nav = () => {
@@ -363,15 +376,19 @@ const Nav = () => {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
-            <Link href="/About" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
-              About
-            </Link>
-            <Link href="/developers" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
+            <Link href="/Developers" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
               Developers
             </Link>
-            <Link href="/contact" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
-              Contact
-            </Link>
+            
+            {user && (userType === 'developer' ? (
+              <Link href="/WorkDashboard" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
+                Work Dashboard
+              </Link>
+            ) : (
+              <Link href="/become-developer" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
+                Become a Developer
+              </Link>
+            ))}
             
             <ThemeToggle setTheme={setTheme} />
 
