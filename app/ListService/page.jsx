@@ -1,25 +1,35 @@
 "use client"
 
-import React, { useState } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import React, { useState, useEffect } from 'react';
+import { getFirestore, collection, addDoc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Check, X, Wallet, Upload, Image as ImageIcon, AlertCircle, Clock, Copy } from 'lucide-react';
+import { auth, db } from '../../firebase';
+import Link from 'next/link';
+import { onAuthStateChanged } from 'firebase/auth';
 
 const ListService = () => {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [user, setUser] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const [connectedWallets, setConnectedWallets] = useState([]);
+  const [selectedWallet, setSelectedWallet] = useState(null);
   const [skillInput, setSkillInput] = useState('');
   const [selectedSkills, setSelectedSkills] = useState([]);
-
+  const [walletStatus, setWalletStatus] = useState({
+    loading: true,
+    error: null,
+    connected: false
+  });
+  
   const [formData, setFormData] = useState({
     title: '',
     rate: '',
@@ -29,7 +39,7 @@ const ListService = () => {
     timezone: '',
     availabilityPattern: 'weekly',
   });
-
+  
   const [availability, setAvailability] = useState({
     monday: { isAvailable: false, slots: [] },
     tuesday: { isAvailable: false, slots: [] },
@@ -39,6 +49,120 @@ const ListService = () => {
     saturday: { isAvailable: false, slots: [] },
     sunday: { isAvailable: false, slots: [] },
   });
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthChecked(true);
+      if (currentUser) {
+        setupWalletListeners(currentUser.uid);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+  const setupWalletListeners = (userId) => {
+    try {
+      setWalletStatus(prev => ({ ...prev, loading: true }));
+      
+      const walletsRef = collection(db, 'users', userId, 'wallets');
+      const walletsQuery = query(walletsRef, where('userId', '==', userId));
+      const unsubscribe = onSnapshot(walletsQuery, (snapshot) => {
+        const walletsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        setConnectedWallets(walletsData);
+        
+        if (walletsData.length > 0) {
+          setSelectedWallet(walletsData[0].id);
+          setIsWalletConnected(true);
+          setWalletStatus({
+            loading: false,
+            error: null,
+            connected: true
+          });
+        } else {
+          setIsWalletConnected(false);
+          setWalletStatus({
+            loading: false,
+            error: null,
+            connected: false
+          });
+        }
+      }, (error) => {
+        console.error('Error fetching wallets:', error);
+        setWalletStatus({
+          loading: false,
+          error: 'Failed to load wallet information',
+          connected: false
+        });
+      });
+
+      return unsubscribe;
+    } catch (err) {
+      console.error('Error setting up wallet listeners:', err);
+      setWalletStatus({
+        loading: false,
+        error: 'Failed to initialize wallet connection',
+        connected: false
+      });
+    }
+  };
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthChecked(true);
+      if (currentUser) {
+        setupWalletListeners(currentUser.uid);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  const uploadImageToCloudinary = async (file) => {
+    try {
+      setUploadingImage(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
+      formData.append('cloud_name', process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME);
+
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Image upload failed');
+      }
+
+      const data = await response.json();
+      return data.secure_url;
+    } catch (err) {
+      console.error('Error uploading image:', err);
+      throw new Error('Failed to upload image');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   const timeSlots = Array.from({ length: 48 }, (_, i) => {
     const hour = Math.floor(i / 2);
@@ -90,9 +214,19 @@ const ListService = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleImageChange = (e) => {
+ const handleImageChange = async (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Image size should be less than 5MB');
+        return;
+      }
+
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        setError('Please upload a valid image file (JPEG, PNG, or WebP)');
+        return;
+      }
+
       setProfileImage(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -143,49 +277,49 @@ const ListService = () => {
       }
     }));
   };
-
-  const toggleSkill = (skill) => {
-    setSelectedSkills(prev => 
-      prev.includes(skill) 
-        ? prev.filter(s => s !== skill)
-        : [...prev, skill]
-    );
-  };
-
-  const handleWalletConnect = async () => {
-    if (typeof window.ethereum !== 'undefined') {
-      try {
-        await window.ethereum.request({ method: 'eth_requestAccounts' });
-        setIsWalletConnected(true);
-      } catch (err) {
-        setError('Failed to connect wallet. Please try again.');
-      }
-    } else {
-      setError('Please install MetaMask to connect your wallet');
-    }
-  };
-
+  
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
     try {
-      let imageUrl = '';
-      if (profileImage) {
-        const storageRef = ref(storage, `profile-images/${Date.now()}-${profileImage.name}`);
-        await uploadBytes(storageRef, profileImage);
-        imageUrl = await getDownloadURL(storageRef);
+      const user = auth.currentUser;
+      if (!user) {
+        setError('Please sign in to publish your service');
+        return;
       }
 
-      const docRef = await addDoc(collection(db, 'services'), {
+      let imageUrl = '';
+      if (profileImage) {
+        try {
+          imageUrl = await uploadImageToCloudinary(profileImage);
+        } catch (err) {
+          setError('Failed to upload image. Please try again.');
+          return;
+        }
+      }
+
+      const selectedWalletData = connectedWallets.find(w => w.id === selectedWallet);
+      
+      const serviceData = {
+        userId: user.uid,
         ...formData,
         skills: selectedSkills,
         imageUrl,
         walletConnected: isWalletConnected,
+        walletInfo: selectedWalletData ? {
+          id: selectedWalletData.id,
+          type: selectedWalletData.type,
+          address: selectedWalletData.address,
+          label: selectedWalletData.label
+        } : null,
         availability,
         createdAt: new Date().toISOString(),
-      });
+      };
+
+      const servicesRef = collection(db, 'services');
+      await addDoc(servicesRef, serviceData);
 
       setSuccess(true);
       setFormData({
@@ -200,12 +334,119 @@ const ListService = () => {
       setProfileImage(null);
       setImagePreview(null);
     } catch (err) {
+      console.error('Error saving service:', err);
       setError('Failed to save service. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const renderWalletSection = () => (
+    <div className="border-t border-gray-200 dark:border-gray-700 pt-8">
+      <div className="max-w-md mx-auto space-y-4">
+        <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 block">
+          Connect Wallet for Payments
+        </label>
+        
+        {walletStatus.loading ? (
+          <div className="flex items-center justify-center py-4">
+            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : walletStatus.error ? (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{walletStatus.error}</AlertDescription>
+          </Alert>
+        ) : connectedWallets.length > 0 ? (
+          <div className="space-y-4">
+            <Select 
+              value={selectedWallet} 
+              onValueChange={setSelectedWallet}
+            >
+              <SelectTrigger className="w-full rounded-xl">
+                <SelectValue placeholder="Select a wallet for payments" />
+              </SelectTrigger>
+              <SelectContent>
+                {connectedWallets.map((wallet) => (
+                  <SelectItem key={wallet.id} value={wallet.id}>
+                    <div className="flex items-center gap-2">
+                      <span>{
+                        wallet.type === 'MetaMask' ? '🦊' :
+                        wallet.type === 'Trust Wallet' ? '💎' :
+                        wallet.type === 'Phantom' ? '👻' : '💳'
+                      }</span>
+                      <span>{wallet.label}</span>
+                      <span className="text-sm text-gray-500">
+                        ({wallet.address.slice(0, 6)}...{wallet.address.slice(-4)})
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Link
+              href="/ManageWallet"
+              className="block text-center text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+            >
+              Manage Wallets
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <button
+              type="button"
+              onClick={handleWalletConnect}
+              disabled={walletStatus.loading}
+              className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              <Wallet className="w-5 h-5" />
+              Connect Wallet
+            </button>
+            
+            <p className="text-sm text-center text-gray-500 dark:text-gray-400">
+              No wallets connected. Please connect a wallet to receive payments.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderImageUpload = () => (
+    <div className="flex justify-center">
+      <div className="relative group">
+        <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900 dark:to-purple-900 flex items-center justify-center border-4 border-white dark:border-gray-700 shadow-lg transition-transform transform group-hover:scale-105">
+          {uploadingImage ? (
+            <div className="flex items-center justify-center">
+              <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+          ) : imagePreview ? (
+            <img 
+              src={imagePreview} 
+              alt="Profile preview" 
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <ImageIcon className="w-12 h-12 text-gray-400" />
+          )}
+        </div>
+        <label className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-all">
+          <Upload className="w-6 h-6 text-white" />
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={handleImageChange}
+            className="hidden"
+            disabled={uploadingImage}
+          />
+        </label>
+      </div>
+    </div>
+  );
+
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-black dark:via-gray-950 dark:to-gray-900 pt-10">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -233,15 +474,7 @@ const ListService = () => {
               <div className="flex justify-center">
                 <div className="relative group">
                   <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900 dark:to-purple-900 flex items-center justify-center border-4 border-white dark:border-gray-700 shadow-lg transition-transform transform group-hover:scale-105">
-                    {imagePreview ? (
-                      <img 
-                        src={imagePreview} 
-                        alt="Profile preview" 
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <ImageIcon className="w-12 h-12 text-gray-400" />
-                    )}
+                  {renderImageUpload()}
                   </div>
                   <label className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-all">
                     <Upload className="w-6 h-6 text-white" />
@@ -498,25 +731,7 @@ const ListService = () => {
               </div>
 
               {/* Wallet Connection */}
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-8">
-                <div className="max-w-md mx-auto">
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 block">
-                    Connect Wallet for Payments
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleWalletConnect}
-                    className={`w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl transition-all transform hover:scale-105 ${
-                      isWalletConnected
-                        ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
-                        : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white'
-                    }`}
-                  >
-                    <Wallet className="w-5 h-5" />
-                    {isWalletConnected ? 'Wallet Connected' : 'Connect MetaMask Wallet'}
-                  </button>
-                </div>
-              </div>
+              {renderWalletSection()}
 
               {/* Submit Button */}
               <div className="pt-8">
