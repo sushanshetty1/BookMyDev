@@ -48,6 +48,8 @@ const ManageWallet = () => {
     MetaMask: false,
     'Trust Wallet': false
   });
+  const INFURA_KEY = "p194044a6f7f6448e99d23ff06cb76a25";
+
 
   const getEthereumProvider = () => {
     if (typeof window !== 'undefined' && window.ethereum) {
@@ -69,11 +71,22 @@ const ManageWallet = () => {
     }
   };
 
+  const WALLET_TYPES = {
+    MetaMask: {
+      name: 'MetaMask',
+      defaultChain: 'ethereum'
+    },
+    'Trust Wallet': {
+      name: 'Trust Wallet',
+      defaultChain: 'bsc'
+    }
+  };
+
   const SUPPORTED_NETWORKS = {
     ethereum: {
       name: 'Ethereum',
       chainId: '0x1',
-      rpcUrl: 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY',
+      rpcUrl: `https://mainnet.infura.io/v3/${INFURA_KEY}`,
       explorer: 'https://etherscan.io',
       nativeCurrency: {
         symbol: 'ETH',
@@ -102,7 +115,6 @@ const ManageWallet = () => {
     }
   };
 
-  // Common token addresses across networks
   const COMMON_TOKENS = {
     ethereum: [
       { symbol: 'USDT', address: '0xdac17f958d2ee523a2206206994597c13d831ec7' },
@@ -158,27 +170,27 @@ const ManageWallet = () => {
     }
   };
 
-  // Update the fetchTransactionHistory function
   const fetchTransactionHistory = async (address, network) => {
     const provider = getNetworkProvider(network);
     try {
       const blockNumber = await provider.getBlockNumber();
-      const fromBlock = blockNumber - 100; // Get last 100 blocks of history
-      
-      // Get transactions
-      const history = await provider.getBlockWithTransactions(blockNumber);
-      const filtered = history.transactions.filter(tx => 
-        tx.from.toLowerCase() === address.toLowerCase() || 
-        (tx.to && tx.to.toLowerCase() === address.toLowerCase())
-      );
+      const fromBlock = blockNumber - 100;
 
-      return filtered.map(tx => ({
-        hash: tx.hash,
-        from: tx.from,
-        to: tx.to,
-        value: formatEther(tx.value),
-        timestamp: new Date().getTime() / 1000, // Current timestamp as fallback
-        status: 1 // Assuming confirmed
+      const filter = {
+        fromBlock,
+        toBlock: blockNumber,
+        address: address
+      };
+  
+      const logs = await provider.getLogs(filter);
+      
+      return logs.map(log => ({
+        hash: log.transactionHash,
+        from: log.address,
+        to: address,
+        value: '0',
+        timestamp: new Date().getTime() / 1000,
+        status: 1
       }));
     } catch (error) {
       console.error(`Error fetching transactions for ${network}:`, error);
@@ -194,31 +206,44 @@ const ManageWallet = () => {
       const newTransactions = { ...transactions };
       newBalances[wallet.address] = {};
       newTransactions[wallet.address] = {};
-
+  
       for (const network of Object.keys(SUPPORTED_NETWORKS)) {
-        // Get native currency balance
-        const nativeBalance = await getNativeBalance(wallet.address, network);
-        newBalances[wallet.address][network] = {
-          native: {
-            symbol: SUPPORTED_NETWORKS[network].nativeCurrency.symbol,
-            balance: nativeBalance
-          },
-          tokens: {}
-        };
-
-        // Get token balances
-        for (const token of COMMON_TOKENS[network]) {
-          const tokenBalance = await getTokenBalance(token.address, wallet.address, network);
-          if (parseFloat(tokenBalance) > 0) {
-            newBalances[wallet.address][network].tokens[token.symbol] = tokenBalance;
+        try {
+          const nativeBalance = await getNativeBalance(wallet.address, network);
+          newBalances[wallet.address][network] = {
+            native: {
+              symbol: SUPPORTED_NETWORKS[network].nativeCurrency.symbol,
+              balance: nativeBalance
+            },
+            tokens: {}
+          };
+  
+          for (const token of COMMON_TOKENS[network]) {
+            try {
+              const tokenBalance = await getTokenBalance(token.address, wallet.address, network);
+              if (parseFloat(tokenBalance) > 0) {
+                newBalances[wallet.address][network].tokens[token.symbol] = tokenBalance;
+              }
+            } catch (tokenError) {
+              console.error(`Error fetching ${token.symbol} balance:`, tokenError);
+            }
           }
+  
+          const txHistory = await fetchTransactionHistory(wallet.address, network);
+          newTransactions[wallet.address][network] = txHistory;
+        } catch (networkError) {
+          console.error(`Error processing ${network}:`, networkError);
+          newBalances[wallet.address][network] = {
+            native: {
+              symbol: SUPPORTED_NETWORKS[network].nativeCurrency.symbol,
+              balance: '0'
+            },
+            tokens: {}
+          };
+          newTransactions[wallet.address][network] = [];
         }
-
-        // Get transaction history
-        const txHistory = await fetchTransactionHistory(wallet.address, network);
-        newTransactions[wallet.address][network] = txHistory;
       }
-
+  
       setBalances(newBalances);
       setTransactions(newTransactions);
     } catch (error) {
@@ -451,30 +476,27 @@ const ManageWallet = () => {
       setError('Please enter a label for your wallet');
       return;
     }
-
+  
     if (wallets.length >= 2) {
       setError('Maximum of 2 wallets allowed');
       return;
     }
-
+  
     setIsConnecting(true);
     try {
       const provider = getEthereumProvider();
       if (!provider) {
         throw new Error('No provider available');
       }
-
+  
       let address;
       
-      // Check if correct wallet is selected
       const isCorrectWallet = (walletType === 'MetaMask' && provider.isMetaMask) ||
                              (walletType === 'Trust Wallet' && provider.isTrust);
                              
       if (!isCorrectWallet) {
         throw new Error(`Please select ${walletType} in your browser`);
       }
-
-      // Request account access
       const accounts = await provider.request({ 
         method: 'eth_requestAccounts' 
       });
@@ -485,25 +507,23 @@ const ManageWallet = () => {
       
       address = accounts[0];
 
-      // Check for duplicate wallet
       if (wallets.some(w => w.address.toLowerCase() === address.toLowerCase())) {
         throw new Error('This wallet is already connected');
       }
-
+  
       const user = auth.currentUser;
       if (!user) throw new Error('User not authenticated');
 
-      // Add wallet to database
       const walletsRef = collection(db, `users/${user.uid}/wallets`);
       await addDoc(walletsRef, {
         type: walletType,
         address,
-        chain: WALLET_CHAINS[walletType],
         label: walletLabel,
+        defaultChain: WALLET_TYPES[walletType].defaultChain,
         userId: user.uid,
         createdAt: serverTimestamp()
       });
-
+  
       setSuccess(`${walletType} wallet connected successfully!`);
       await verifyAndUpdateWallets();
       setWalletLabel('');
@@ -513,7 +533,7 @@ const ManageWallet = () => {
       setIsConnecting(false);
     }
   };
-
+  
   const disconnectWallet = async (walletId) => {
     try {
       const user = auth.currentUser;
@@ -581,12 +601,11 @@ const ManageWallet = () => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
     window.addEventListener('resize', handleResize);
     
-    // Set up periodic updates
     const updateInterval = setInterval(() => {
       if (wallets.length > 0) {
         updateBalancesAndTransactions();
       }
-    }, 30000); // Update every 30 seconds
+    }, 30000);
     
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -625,7 +644,7 @@ const ManageWallet = () => {
   }
 
   return (
-    <div className="container max-w-4xl mx-auto p-4 space-y-6">
+    <div className="container max-w-4xl mx-auto p-4 space-y-6 mt-14">
       <h1 className="text-3xl font-bold mb-8 flex items-center gap-2">
         <Wallet className="h-8 w-8 text-primary" />
         Manage Wallet
