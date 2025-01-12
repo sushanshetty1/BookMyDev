@@ -250,7 +250,7 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
                 onClick={() => setIsSheetOpen(false)} 
               />
               <NavigationItem 
-                href="/manage-wallet" 
+                href="/ManageWallet" 
                 icon={Settings} 
                 label="Manage Wallet" 
                 onClick={() => setIsSheetOpen(false)} 
@@ -258,7 +258,7 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
             </>
           ) : (
             <NavigationItem 
-              href="/become-developer" 
+              href="/BecomeDeveloper" 
               icon={Rocket} 
               label="Become a Developer" 
               onClick={() => setIsSheetOpen(false)} 

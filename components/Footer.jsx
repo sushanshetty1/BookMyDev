@@ -33,13 +33,8 @@ const Footer = () => {
                 </Link>
               </li>
               <li>
-                <Link href="/developers" className="text-muted-foreground hover:text-foreground transition-colors">
+                <Link href="/Developers" className="text-muted-foreground hover:text-foreground transition-colors">
                   Find Developers
-                </Link>
-              </li>
-              <li>
-                <Link href="/become-dev" className="text-muted-foreground hover:text-foreground transition-colors">
-                  Become a Developer
                 </Link>
               </li>
               <li>
@@ -65,13 +60,8 @@ const Footer = () => {
                 </Link>
               </li>
               <li>
-                <Link href="/faq" className="text-muted-foreground hover:text-foreground transition-colors">
+                <Link href="/FAQ" className="text-muted-foreground hover:text-foreground transition-colors">
                   FAQ
-                </Link>
-              </li>
-              <li>
-                <Link href="/support" className="text-muted-foreground hover:text-foreground transition-colors">
-                  Support
                 </Link>
               </li>
             </ul>
