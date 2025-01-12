@@ -2,7 +2,7 @@
 import React, { useEffect, useState, memo } from 'react';
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Menu, Sun, Moon, Code2, User, LogOut, Settings, Laptop, WifiOff, Home, InfoIcon, Users, Mail, Layout, Rocket } from "lucide-react";
+import { Menu, Sun, Moon, Code2, User, LogOut, Settings, Laptop, WifiOff, Home, InfoIcon, Users, Mail, Layout, Rocket, BookIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { auth } from '../firebase';
 import { db } from '../firebase';
@@ -241,6 +241,13 @@ const MobileSheetContent = memo(({ user, userType, handleSignOut, setTheme, setI
           <NavigationItem href="/" icon={Home} label="Home" onClick={() => setIsSheetOpen(false)} />
           <NavigationItem href="/Developers" icon={Users} label="Developers" onClick={() => setIsSheetOpen(false)} />
           
+          {user && userType === 'client' && (
+              <NavigationItem
+                href="/YourBookings"
+                icon={BookIcon} label="Your Bookings" onClick={() => setIsSheetOpen(false)}
+              />
+            )}
+
           {user && (userType === 'developer' ? (
             <>
               <NavigationItem 
@@ -387,6 +394,16 @@ const Nav = () => {
             <Link href="/Developers" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
               Developers
             </Link>
+
+            {user && userType === 'client' && (
+              <Link
+                href="/YourBookings"
+                className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors"
+              >
+                Your Bookings
+              </Link>
+            )}
+
             
             {user && (userType === 'developer' ? (
               <Link href="/WorkDashboard" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">

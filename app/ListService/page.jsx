@@ -1,9 +1,8 @@
 //ListService.jsx
 
 "use client"
-
 import React, { useState, useEffect } from 'react';
-import { setDoc, collection, doc, getDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { setDoc, collection, doc, getDoc, query, where, onSnapshot, updateDoc } from 'firebase/firestore';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
