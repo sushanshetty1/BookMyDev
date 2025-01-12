@@ -456,7 +456,6 @@ const handleSubmit = async (e) => {
     let txHash = null;
     let paymentStatus = 'pending';
 
-    // Handle payment based on test mode and bypass settings
     if (!isTestMode && !bypassPayment && walletConnected) {
       try {
         txHash = await processPayment();

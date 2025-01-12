@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import NavbarSkeleton from '@/components/NavbarSkeleton';
+import BecomeDeveloperDialog from './BecomeDeveloperDialog'; 
 
 const AnimatedDevAvatar = memo(({ user, userType, getInitials, isOffline }) => (
   <div className="relative h-10 w-10">
@@ -157,12 +158,15 @@ const UserMenu = memo(({ user, userType, isOffline, handleSignOut, getInitials }
           </Link>
         </DropdownMenuItem>
       ) : (
-        <DropdownMenuItem asChild className="hover:bg-accent">
-          <Link href="/become-developer" className="flex items-center gap-2 py-2">
-            <Rocket className="h-4 w-4" />
-            <span>Become a Developer</span>
-          </Link>
-        </DropdownMenuItem>
+        <BecomeDeveloperDialog user={user}>
+        <button 
+          className="flex items-center space-x-3 p-3 rounded-lg hover:bg-accent transition-colors w-full" 
+          onClick={() => setIsSheetOpen(false)}
+        >
+          <Rocket className="h-5 w-5 text-muted-foreground" />
+          <span className="text-base font-medium">Become a Developer</span>
+        </button>
+      </BecomeDeveloperDialog>
       )}
       
       <DropdownMenuSeparator className="my-2" />
@@ -404,15 +408,17 @@ const Nav = () => {
               </Link>
             )}
 
-            
             {user && (userType === 'developer' ? (
               <Link href="/WorkDashboard" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
                 Work Dashboard
               </Link>
             ) : (
-              <Link href="/become-developer" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
-                Become a Developer
-              </Link>
+              // Replace the existing Link with BecomeDeveloperDialog
+              <BecomeDeveloperDialog user={user}>
+                <Button variant="ghost" className="text-lg font-medium text-foreground/70 hover:text-foreground transition-colors">
+                  Become a Developer
+                </Button>
+              </BecomeDeveloperDialog>
             ))}
             
             <ThemeToggle setTheme={setTheme} />
