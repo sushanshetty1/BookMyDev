@@ -222,6 +222,26 @@ const [bypassPayment, setBypassPayment] = useState(false);
     return now >= joinWindowStart && now < sessionEndDate;
   };
 
+  const handleTestTime = () => {
+    const now = new Date();
+    setSelectedDate(now);
+    setIsTestMode(true);
+    setSelectedSlot(null);
+    
+    // Get the current hour
+    const currentHour = now.getHours();
+    const nextHour = currentHour + 1;
+    
+    // Create a time slot for the next hour
+    const testSlot = {
+      start: `${currentHour.toString().padStart(2, '0')}:00`,
+      end: `${nextHour.toString().padStart(2, '0')}:00`
+    };
+    
+    setSelectedSlot(testSlot);
+    setIsToday(true);
+  };
+
   const handleDateSelect = (date) => {
     if (!date) {
       setSelectedDate(null);
@@ -445,9 +465,9 @@ const handleSubmit = async (e) => {
         throw new Error(`Payment failed: ${paymentError.message}`);
       }
     } else if (isTestMode) {
-      paymentStatus = 'test_booking';
+      paymentStatus = 'completed';
     } else if (bypassPayment) {
-      paymentStatus = 'bypassed';
+      paymentStatus = 'completed';
     }
 
     const bookingId = `${Date.now()}-${user.uid}`;
@@ -730,6 +750,7 @@ const handleSubmit = async (e) => {
                           <CalendarIcon className="w-4 h-4" />
                           Select Date
                         </label>
+
                         <Calendar
                           mode="single"
                           selected={selectedDate}
@@ -737,6 +758,14 @@ const handleSubmit = async (e) => {
                           disabled={isDateDisabled}
                           className="rounded-xl border-2 border-gray-200 dark:border-gray-700 p-3 dark:bg-gray-800"
                         />
+                                                <Button
+                            type="button"
+                            onClick={handleTestTime}
+                            variant="outline"
+                            className="bg-blue-500 text-white hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700"
+                          >
+                            Test Time
+                          </Button>
                       </div>
 
                       <div className="space-y-6">
