@@ -130,19 +130,24 @@ const DeveloperDashboard = () => {
     if (!timestamp) return null;
     
     try {
-      if (timestamp?.toDate) {
-        return timestamp.toDate();
-      }
-
+      // If it's already a Date object, return it
       if (timestamp instanceof Date) {
         return timestamp;
       }
-
-      if (typeof timestamp === 'number') {
-        return new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp);
+      
+      // Handle Firestore Timestamp
+      if (timestamp?.toDate) {
+        return timestamp.toDate();
       }
-
+      
+      // Handle string timestamps
       if (typeof timestamp === 'string') {
+        const date = new Date(timestamp);
+        return isNaN(date.getTime()) ? null : date;
+      }
+      
+      // Handle numeric timestamps
+      if (typeof timestamp === 'number') {
         const date = new Date(timestamp);
         return isNaN(date.getTime()) ? null : date;
       }
@@ -155,42 +160,67 @@ const DeveloperDashboard = () => {
   };
 
   const shouldShowJoinMeeting = (booking) => {
-    if (!booking.date || !booking.timeSlot || 
+    if (!booking?.date || !booking?.timeSlot?.start || !booking?.timeSlot?.end || 
         booking.paymentStatus !== 'completed' || 
         booking.status !== 'confirmed') {
       return false;
     }
 
-    const now = new Date();
-    const bookingDate = booking.date.toDate();
-    
-    const bookingStart = new Date(bookingDate);
-    const [startHour, startMinute] = booking.timeSlot.start.split(':');
-    bookingStart.setHours(parseInt(startHour, 10), parseInt(startMinute, 10), 0, 0);
-    
-    const bookingEnd = new Date(bookingDate);
-    const [endHour, endMinute] = booking.timeSlot.end.split(':');
-    bookingEnd.setHours(parseInt(endHour, 10), parseInt(endMinute, 10), 0, 0);
-    
-    const fifteenMinutesBefore = new Date(bookingStart);
-    fifteenMinutesBefore.setMinutes(bookingStart.getMinutes() - 15);
+    try {
+      const now = new Date();
+      const bookingDate = convertTimestamp(booking.date);
+      
+      if (!bookingDate) {
+        console.error('Invalid booking date');
+        return false;
+      }
 
-    const isWithinTimeRange = now >= fifteenMinutesBefore && now <= bookingEnd;
-    
-    const isSameDay = now.toDateString() === bookingDate.toDateString();
-    return isWithinTimeRange && isSameDay;
+      const bookingStart = new Date(bookingDate);
+      const [startHour, startMinute] = booking.timeSlot.start.split(':');
+      bookingStart.setHours(parseInt(startHour, 10), parseInt(startMinute, 10), 0, 0);
+      
+      const bookingEnd = new Date(bookingDate);
+      const [endHour, endMinute] = booking.timeSlot.end.split(':');
+      bookingEnd.setHours(parseInt(endHour, 10), parseInt(endMinute, 10), 0, 0);
+      
+      const fifteenMinutesBefore = new Date(bookingStart);
+      fifteenMinutesBefore.setMinutes(bookingStart.getMinutes() - 15);
+
+      return now >= fifteenMinutesBefore && 
+             now <= bookingEnd && 
+             now.toDateString() === bookingDate.toDateString();
+    } catch (error) {
+      console.error('Error in shouldShowJoinMeeting:', error);
+      return false;
+    }
   };
 
   useEffect(() => {
     const fetchData = async () => {
-      const user = auth.currentUser;
-      if (!user) {
-        setError('Please sign in to view your dashboard');
-        setLoading(false);
-        return;
-      }
-
       try {
+        const user = auth.currentUser;
+        if (!user) {
+          setError('Please sign in to view your dashboard');
+          setLoading(false);
+          return;
+        }
+
+        // Add security rules check
+        try {
+          const testQuery = query(
+            collection(db, 'services'),
+            where('developerId', '==', user.uid),
+            limit(1)
+          );
+          await getDocs(testQuery);
+        } catch (error) {
+          if (error.code === 'permission-denied') {
+            setError('You do not have permission to access this dashboard. Please contact support.');
+            setLoading(false);
+            return;
+          }
+        }
+
         const servicesQuery = query(
           collection(db, 'services'),
           where('developerId', '==', user.uid)
@@ -204,7 +234,11 @@ const DeveloperDashboard = () => {
           setServices(servicesData);
         }, (error) => {
           console.error('Error fetching services:', error);
-          setError('Failed to load services. Please check your permissions.');
+          if (error.code === 'permission-denied') {
+            setError('Access denied. Please check your permissions.');
+          } else {
+            setError('Failed to load services. Please try again later.');
+          }
         });
 
         const bookingsQuery = query(
@@ -216,45 +250,49 @@ const DeveloperDashboard = () => {
         const unsubscribeBookings = onSnapshot(bookingsQuery, (snapshot) => {
           const now = new Date();
           const bookingsData = snapshot.docs.map(doc => {
-            const data = doc.data();
-            const bookingDate = convertTimestamp(data.date);
-            
-            if (!bookingDate) {
-              console.warn(`Invalid date for booking ${doc.id}`);
+            try {
+              const data = doc.data();
+              const bookingDate = convertTimestamp(data.date);
+              
+              if (!bookingDate) {
+                console.warn(`Invalid date for booking ${doc.id}`);
+                return null;
+              }
+
+              const bookingEnd = new Date(bookingDate);
+              
+              if (data.timeSlot?.end) {
+                const [endHour, endMinute] = data.timeSlot.end.split(':');
+                bookingEnd.setHours(parseInt(endHour, 10), parseInt(endMinute, 10), 0, 0);
+              }
+              
+              const isExpired = bookingEnd < now;
+
+              if (isExpired && data.status === 'pending') {
+                updateDoc(doc.ref, { 
+                  status: 'completed',
+                  updatedAt: Timestamp.now()
+                }).catch(error => {
+                  console.error('Error updating expired booking:', error);
+                });
+                data.status = 'completed';
+              }
+              
+              return {
+                id: doc.id,
+                ...data,
+                date: bookingDate,
+                isExpired
+              };
+            } catch (error) {
+              console.error(`Error processing booking ${doc.id}:`, error);
               return null;
             }
-
-            const bookingEnd = new Date(bookingDate);
-            
-            if (data.timeSlot?.end) {
-              const [endHour, endMinute] = data.timeSlot.end.split(':');
-              bookingEnd.setHours(parseInt(endHour, 10), parseInt(endMinute, 10), 0, 0);
-            }
-            
-            const isExpired = bookingEnd < now;
-
-            // Only update status if the booking exists and is pending
-            if (isExpired && data.status === 'pending') {
-              updateDoc(doc.ref, { 
-                status: 'completed',
-                updatedAt: Timestamp.now()
-              }).catch(error => {
-                console.error('Error updating expired booking:', error);
-              });
-              data.status = 'completed';
-            }
-            
-            return {
-              id: doc.id,
-              ...data,
-              date: bookingDate, // Store the converted date
-              isExpired
-            };
-          }).filter(Boolean); // Remove null entries
+          }).filter(Boolean);
           
           const sortedBookings = bookingsData.sort((a, b) => {
             if (a.isExpired === b.isExpired) {
-              return a.date - b.date;
+              return new Date(a.date) - new Date(b.date);
             }
             return a.isExpired ? 1 : -1;
           });
@@ -263,7 +301,11 @@ const DeveloperDashboard = () => {
           calculateStats(sortedBookings);
         }, (error) => {
           console.error('Error fetching bookings:', error);
-          setError('Failed to load bookings. Please check your permissions.');
+          if (error.code === 'permission-denied') {
+            setError('Access denied. Please check your permissions.');
+          } else {
+            setError('Failed to load bookings. Please try again later.');
+          }
         });
 
         setLoading(false);
@@ -273,8 +315,8 @@ const DeveloperDashboard = () => {
           unsubscribeBookings();
         };
       } catch (error) {
-        console.error('Error setting up listeners:', error);
-        setError('An error occurred while loading the dashboard');
+        console.error('Error in fetchData:', error);
+        setError('An unexpected error occurred. Please try again later.');
         setLoading(false);
       }
     };
@@ -453,8 +495,8 @@ const DeveloperDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-black p-8 mt-12">
-    {toast && (
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-black p-4 sm:p-8 mt-12">
+      {toast && (
         <Toast
           message={toast.message}
           type={toast.type}
@@ -462,39 +504,38 @@ const DeveloperDashboard = () => {
         />
       )}
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
+        {/* Responsive Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               Developer Dashboard
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-2">
+            <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-2">
               Manage your services and bookings
             </p>
           </div>
           <Link href={'/ListService'}>
-          <Button
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            List New Services
-          </Button>
+            <Button className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+              <Plus className="w-4 h-4 mr-2" />
+              List New Services
+            </Button>
           </Link>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {/* Responsive Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+          {/* Stats cards with responsive padding */}
           <Card className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm">
-            <CardContent className="p-6">
+            <CardContent className="p-4 sm:p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Bookings</p>
-                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+                  <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total Bookings</p>
+                  <h3 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mt-1">
                     {stats.totalBookings}
                   </h3>
                 </div>
-                <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-full">
-                  <BookOpen className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+                  <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
                 </div>
               </div>
             </CardContent>

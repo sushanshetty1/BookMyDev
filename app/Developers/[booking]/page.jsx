@@ -56,6 +56,8 @@ const BookingPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
+  const [isTestMode, setIsTestMode] = useState(false);
+const [bypassPayment, setBypassPayment] = useState(false);
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [duration, setDuration] = useState(1);
@@ -200,6 +202,8 @@ const BookingPage = () => {
     }
   }, []);
 
+  
+
   const isCurrentSession = (date, timeSlot) => {
     if (!date || !timeSlot) return false;
 
@@ -223,11 +227,25 @@ const BookingPage = () => {
       setSelectedDate(null);
       setSelectedSlot(null);
       setIsToday(false);
+      setIsTestMode(false);
       return;
+    }
+    
+    // Get today's date for comparison
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isTestDate = date.toDateString() === today.toDateString();
+    
+    if (isTestDate) {
+      // For test dates, use current time
+      const now = new Date();
+      date = now;
     }
     
     setSelectedDate(date);
     setSelectedSlot(null);
+    setIsTestMode(isTestDate);
+    
     if (selectedSlot) {
       setIsToday(isCurrentSession(date, selectedSlot));
     } else {
@@ -399,71 +417,96 @@ const BookingPage = () => {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!selectedDate || !selectedSlot || !termsAccepted) {
-      return;
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  if (!selectedDate || !selectedSlot || !termsAccepted) {
+    return;
+  }
+
+  setSubmitting(true);
+  setError(null);
+
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('Please sign in to book a session');
     }
 
-    setSubmitting(true);
+    let txHash = null;
+    let paymentStatus = 'pending';
 
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        throw new Error('Please sign in to book a session');
-      }
-
-      let txHash = null;
-      let paymentStatus = 'pending';
-
-      // Update payment logic to use isCurrentSession check
-      if (isCurrentSession(selectedDate, selectedSlot) && walletConnected) {
+    // Handle payment based on test mode and bypass settings
+    if (!isTestMode && !bypassPayment && walletConnected) {
+      try {
         txHash = await processPayment();
         paymentStatus = 'completed';
+      } catch (paymentError) {
+        throw new Error(`Payment failed: ${paymentError.message}`);
       }
-      
-      const bookingId = `${Date.now()}-${user.uid}`;
-      const roomId = `${bookingId}-${developer.id}`;
-      const bookingData = {
-        userId: user.uid,
-        roomId: roomId,
-        developerId: developer.id,
-        date: selectedDate.toISOString(),
-        timeSlot: selectedSlot,
-        duration,
-        totalCost,
-        status: 'confirmed',
-        paymentStatus,
-        walletInfo: connectedWallet || null,
-        transactionHash: txHash,
-        createdAt: new Date().toISOString(),
-        paymentDue: !isCurrentSession(selectedDate, selectedSlot) ? selectedDate.toISOString() : null
-      };
-
-      await setDoc(doc(db, 'bookings', bookingId), bookingData);
-      
-      // Update video conference logic to use isCurrentSession check
-      if (isCurrentSession(selectedDate, selectedSlot)) {
-        setConferenceRoomId(roomId);
-        setShowVideoConference(true);
-
-        await setDoc(doc(db, 'devMeet', developer.id), {
-          type: 'session_start',
-          bookingId: bookingId,
-          roomId: roomId,
-          timestamp: new Date().toISOString(),
-          read: false
-        });
-      } else {
-        setShowSuccessDialog(true);
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to create booking');
-    } finally {
-      setSubmitting(false);
+    } else if (isTestMode) {
+      paymentStatus = 'test_booking';
+    } else if (bypassPayment) {
+      paymentStatus = 'bypassed';
     }
-  };
+
+    const bookingId = `${Date.now()}-${user.uid}`;
+    const roomId = `${bookingId}-${developer.id}`;
+
+    // Use current date/time for test bookings
+    const bookingDate = isTestMode ? new Date() : selectedDate;
+
+    const bookingData = {
+      userId: user.uid,
+      userEmail: user.email,
+      userName: user.displayName,
+      roomId: roomId,
+      developerId: developer.id,
+      developerName: developer.title,
+      date: bookingDate.toISOString(),
+      timeSlot: selectedSlot,
+      duration,
+      totalCost,
+      status: 'confirmed',
+      paymentStatus,
+      walletInfo: connectedWallet || null,
+      transactionHash: txHash,
+      createdAt: new Date().toISOString(),
+      isTestBooking: isTestMode,
+      paymentBypassed: bypassPayment,
+      paymentDue: (!isCurrentSession(bookingDate, selectedSlot) && !isTestMode) 
+        ? bookingDate.toISOString() 
+        : null
+    };
+
+    // Save booking to database
+    await setDoc(doc(db, 'bookings', bookingId), bookingData);
+
+    // Handle immediate session start for test bookings
+    if (isTestMode || isCurrentSession(bookingDate, selectedSlot)) {
+      setConferenceRoomId(roomId);
+      setShowVideoConference(true);
+
+      // Notify developer
+      await setDoc(doc(db, 'devMeet', developer.id), {
+        type: 'session_start',
+        bookingId: bookingId,
+        roomId: roomId,
+        timestamp: new Date().toISOString(),
+        read: false,
+        isTestSession: isTestMode
+      });
+    } else {
+      setShowSuccessDialog(true);
+    }
+
+  } catch (err) {
+    console.error('Booking error:', err);
+    setError(err.message || 'Failed to create booking');
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   useEffect(() => {
     if (selectedDate && developer?.availability) {
@@ -781,18 +824,40 @@ const BookingPage = () => {
                           I agree to the terms and conditions
                         </label>
                       </div>
+                      {isTestMode && (
+                        <div className="mb-4">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setBypassPayment(!bypassPayment)}
+                            className={`w-full ${
+                              bypassPayment 
+                                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' 
+                                : ''
+                            }`}
+                          >
+                            {bypassPayment ? 'Payment Bypass Enabled' : 'Bypass Payment (Test Only)'}
+                          </Button>
+                        </div>
+                      )}
 
                       <Button
                         type="submit"
                         className="w-full h-12 text-lg bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white transition-all duration-200 disabled:opacity-50"
-                        disabled={!selectedDate || !selectedSlot || (!walletConnected && isToday) || !termsAccepted || submitting}
+                        disabled={
+                          !selectedDate || 
+                          !selectedSlot || 
+                          (!walletConnected && isToday && !bypassPayment) || 
+                          !termsAccepted || 
+                          submitting
+                        }
                       >
                         {submitting ? (
                           <div className="flex items-center gap-2">
                             <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                             Processing...
                           </div>
-                        ) : isToday ? 'Book and Pay Now' : 'Book Session'}
+                        ) : isTestMode ? 'Start Test Session' : isToday ? 'Book and Pay Now' : 'Book Session'}
                       </Button>
                     </div>
                   </form>
