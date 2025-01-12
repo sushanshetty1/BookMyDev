@@ -1,6 +1,8 @@
 "use client"
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, X, Filter, Star, Clock, Check, ChevronDown } from 'lucide-react';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
 import {
   Select,
   SelectContent,
@@ -37,60 +39,85 @@ const DevelopersPage = () => {
   const [minRating, setMinRating] = useState('all');
   const [page, setPage] = useState(1);
   const [selectedSort, setSelectedSort] = useState('recommended');
+  const [developers, setDevelopers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const developers = [
-    {
-      id: 1,
-      name: 'Sarah Chen',
-      title: 'Full Stack Developer',
-      skills: ['React', 'Node.js', 'Python', 'AWS'],
-      rate: 150,
-      rating: 4.9,
-      reviews: 128,
-      availability: 'Available Now',
-      status: 'online',
-      image: '/api/placeholder/150/150',
-      lastActive: '2 minutes ago',
-      timezone: 'PST',
-      bio: 'Full stack developer with 8+ years of experience building scalable web applications.'
-    },
-    {
-      id: 2,
-      name: 'Mike Johnson',
-      title: 'React Specialist',
-      skills: ['React', 'TypeScript', 'Next.js', 'TailwindCSS'],
-      rate: 125,
-      rating: 4.8,
-      reviews: 89,
-      availability: 'Available in 2 hours',
-      status: 'away',
-      image: '/api/placeholder/150/150',
-      lastActive: '1 hour ago',
-      timezone: 'EST',
-      bio: 'Frontend expert specializing in React and modern JavaScript frameworks.'
-    },
-    {
-      id: 3,
-      name: 'Alex Kumar',
-      title: 'Cloud Architect',
-      skills: ['AWS', 'Docker', 'Kubernetes', 'DevOps'],
-      rate: 175,
-      rating: 4.9,
-      reviews: 156,
-      availability: 'Available Today',
-      status: 'online',
-      image: '/api/placeholder/150/150',
-      lastActive: '5 minutes ago',
-      timezone: 'GMT',
-      bio: 'Senior cloud architect with expertise in AWS and containerization.'
+  // Fetch developers from Firebase
+  useEffect(() => {
+    try {
+      const servicesRef = collection(db, 'services');
+      const unsubscribe = onSnapshot(servicesRef, (snapshot) => {
+        const developersData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          // Transform the availability data into a status string
+          status: isAvailableNow(doc.data().availability) ? 'online' : 'away',
+          // Transform the availability data into a readable string
+          availabilityString: getAvailabilityString(doc.data().availability)
+        }));
+        setDevelopers(developersData);
+        setLoading(false);
+      }, (err) => {
+        console.error("Error fetching developers:", err);
+        setError("Failed to load developers");
+        setLoading(false);
+      });
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("Error setting up developers listener:", err);
+      setError("Failed to initialize developers");
+      setLoading(false);
     }
-  ];
+  }, []);
 
-  const allSkills = [
-    'React', 'Node.js', 'Python', 'AWS', 'TypeScript', 'Next.js', 
-    'TailwindCSS', 'Docker', 'Kubernetes', 'DevOps', 'JavaScript',
-    'Vue.js', 'Angular', 'Java', 'Go', 'Ruby', 'PHP'
-  ];
+
+const isAvailableNow = (availability) => {
+  if (!availability) return false;
+  
+  const now = new Date();
+  const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const time = now.getHours().toString().padStart(2, '0') + ':' + 
+               now.getMinutes().toString().padStart(2, '0');
+  
+  const dayAvailability = availability[day];
+  if (!dayAvailability?.isAvailable) return false;
+  
+  return dayAvailability.slots.some(slot => 
+    time >= slot.start && time <= slot.end
+  );
+};
+
+const getAvailabilityString = (availability) => {
+  if (!availability) return "Not Available";
+  
+  const now = new Date();
+  const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  
+  if (isAvailableNow(availability)) {
+    return "Available Now";
+  }
+
+  const todaySlots = availability[day]?.slots || [];
+  const time = now.getHours().toString().padStart(2, '0') + ':' + 
+               now.getMinutes().toString().padStart(2, '0');
+  
+  const laterToday = todaySlots.some(slot => slot.start > time);
+  if (laterToday) return "Available Today";
+  
+  return "Available This Week";
+};
+
+  const allSkills = useMemo(() => {
+    const skillsSet = new Set();
+    developers.forEach(dev => {
+      if (dev.skills) {
+        dev.skills.forEach(skill => skillsSet.add(skill));
+      }
+    });
+    return Array.from(skillsSet).sort();
+  }, [developers]);
 
   const filteredDevelopers = useMemo(() => {
     return developers
@@ -98,14 +125,14 @@ const DevelopersPage = () => {
         // Search query filter
         const searchLower = searchQuery.toLowerCase();
         const matchesSearch = 
-          dev.name.toLowerCase().includes(searchLower) ||
-          dev.title.toLowerCase().includes(searchLower) ||
-          dev.skills.some(skill => skill.toLowerCase().includes(searchLower));
+          dev.title?.toLowerCase().includes(searchLower) ||
+          dev.description?.toLowerCase().includes(searchLower) ||
+          dev.skills?.some(skill => skill.toLowerCase().includes(searchLower));
 
         // Skills filter
         const matchesSkills = 
           selectedSkills.length === 0 ||
-          selectedSkills.every(skill => dev.skills.includes(skill));
+          selectedSkills.every(skill => dev.skills?.includes(skill));
 
         // Rate range filter
         const matchesRate = 
@@ -114,33 +141,25 @@ const DevelopersPage = () => {
         // Availability filter
         const matchesAvailability = 
           availability === 'all' ||
-          (availability === 'now' && dev.availability === 'Available Now') ||
-          (availability === 'today' && dev.availability === 'Available Today') ||
-          (availability === 'week' && dev.availability.includes('Available'));
+          (availability === 'now' && dev.availabilityString === 'Available Now') ||
+          (availability === 'today' && dev.availabilityString === 'Available Today') ||
+          (availability === 'week' && dev.availabilityString.includes('Available'));
 
-        // Rating filter
-        const matchesRating =
-          minRating === 'all' ||
-          dev.rating >= parseFloat(minRating);
-
-        return matchesSearch && matchesSkills && matchesRate && 
-               matchesAvailability && matchesRating;
+        return matchesSearch && matchesSkills && matchesRate && matchesAvailability;
       })
       .sort((a, b) => {
         switch (selectedSort) {
-          case 'rating':
-            return b.rating - a.rating;
           case 'rate-low':
             return a.rate - b.rate;
           case 'rate-high':
             return b.rate - a.rate;
           case 'availability':
-            return a.availability.localeCompare(b.availability);
+            return a.availabilityString.localeCompare(b.availabilityString);
           default:
             return 0;
         }
       });
-  }, [developers, searchQuery, selectedSkills, rateRange, availability, minRating, selectedSort]);
+  }, [developers, searchQuery, selectedSkills, rateRange, availability, selectedSort]);
 
 
   const sortOptions = [
@@ -379,118 +398,115 @@ const DevelopersPage = () => {
             </div>
 
             {/* Developer Cards */}
-            <div className="grid gap-6">
-              {filteredDevelopers
-                .slice((page - 1) * 10, page * 10)
-                .map((dev) => (
-                  <div
-                    key={dev.id}
-                    className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 hover:border-blue-500 dark:hover:border-blue-400 transition-all"
-                  >
-                  <div className="flex flex-col md:flex-row gap-6">
-                    {/* Left Column - Profile Info */}
-                    <div className="md:w-64 shrink-0">
-                      <div className="flex flex-col items-center text-center">
-                        <div className="relative mb-3">
-                          <img
-                            src={dev.image}
-                            alt={dev.name}
-                            className="w-24 h-24 rounded-full object-cover"
-                          />
-                          <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 ${
-                            dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
-                          }`} />
-                        </div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
-                          {dev.name}
-                          </h3>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">
-                          {dev.title}
-                        </p>
-                        <div className="flex items-center gap-1.5 text-sm mb-4">
-                          <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                          <span className="font-medium text-gray-900 dark:text-white">
-                            {dev.rating}
-                          </span>
-                          <span className="text-gray-500 dark:text-gray-400">
-                            ({dev.reviews} reviews)
-                          </span>
-                        </div>
-                        <button className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors mb-4">
-                          Book Now
-                        </button>
-                        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                          <Clock className="w-4 h-4" />
-                          <span>{dev.timezone}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right Column - Developer Details */}
-                    <div className="flex-1 space-y-6">
-                      {/* Bio */}
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          About
-                        </h4>
-                        <p className="text-gray-600 dark:text-gray-400">
-                          {dev.bio}
-                        </p>
-                      </div>
-
-                      {/* Skills */}
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                          Skills
-                        </h4>
-                        <div className="flex flex-wrap gap-2">
-                          {dev.skills.map((skill, index) => (
-                            <span
-                              key={index}
-                              className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
-                            >
-                              {skill}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Rate and Availability */}
-                      <div className="flex flex-wrap gap-6">
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Hourly Rate
-                          </h4>
-                          <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                            ${dev.rate}/hr
-                          </p>
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Availability
-                          </h4>
-                          <p className="text-sm">
-                            <span className="inline-flex items-center gap-1.5">
-                              <span className={`w-2 h-2 rounded-full ${
+            <div className="flex-1 space-y-6">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            ) : error ? (
+              <div className="text-center py-12 text-red-500">{error}</div>
+            ) : filteredDevelopers.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                No developers found matching your criteria
+              </div>
+            ) : (
+              <div className="grid gap-6">
+                {filteredDevelopers
+                  .slice((page - 1) * 10, page * 10)
+                  .map((dev) => (
+                    <div
+                      key={dev.id}
+                      className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 hover:border-blue-500 dark:hover:border-blue-400 transition-all"
+                    >
+                      <div className="flex flex-col md:flex-row gap-6">
+                        {/* Profile Info */}
+                        <div className="md:w-64 shrink-0">
+                          <div className="flex flex-col items-center text-center">
+                            <div className="relative mb-3">
+                              <img
+                                src={dev.imageUrl || '/api/placeholder/150/150'}
+                                alt={dev.title}
+                                className="w-24 h-24 rounded-full object-cover"
+                              />
+                              <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 ${
                                 dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
                               }`} />
-                              <span className="text-gray-900 dark:text-white">{dev.availability}</span>
-                            </span>
-                          </p>
+                            </div>
+                            <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+                              {dev.title}
+                            </h3>
+                            <div className="flex items-center gap-1.5 text-sm mb-4">
+                              <span className="text-gray-500 dark:text-gray-400">
+                                {dev.timezone}
+                              </span>
+                            </div>
+                            <button className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors mb-4">
+                              Book Now
+                            </button>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Last Active
-                          </h4>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">
-                            {dev.lastActive}
-                          </p>
+
+                        {/* Developer Details */}
+                        <div className="flex-1 space-y-6">
+                          {/* Description */}
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              About
+                            </h4>
+                            <p className="text-gray-600 dark:text-gray-400">
+                              {dev.description}
+                            </p>
+                          </div>
+
+                          {/* Skills */}
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                              Skills
+                            </h4>
+                            <div className="flex flex-wrap gap-2">
+                              {dev.skills?.map((skill, index) => (
+                                <span
+                                  key={index}
+                                  className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                                >
+                                  {skill}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Rate and Availability */}
+                          <div className="flex flex-wrap gap-6">
+                            <div>
+                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Hourly Rate
+                              </h4>
+                              <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                                ${dev.rate}/hr
+                              </p>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Availability
+                              </h4>
+                              <p className="text-sm">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <span className={`w-2 h-2 rounded-full ${
+                                    dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
+                                  }`} />
+                                  <span className="text-gray-900 dark:text-white">
+                                    {dev.availabilityString}
+                                  </span>
+                                </span>
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  ))}
+              </div>
+            )}
             </div>
 
             {/* Pagination */}

@@ -1,237 +1,446 @@
 "use client"
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { 
   Wallet, 
-  ArrowDownRight, 
-  ArrowUpRight, 
-  RefreshCw, 
+  ExternalLink,
   AlertCircle,
   Trash2,
-  ExternalLink
+  RefreshCw,
+  ChevronDown,
+  Clock
 } from "lucide-react";
-import WalletSkeleton from '@/components/WalletSkeleton';
-import { auth, db } from '../../firebase';
-import { 
-  doc, 
-  getDoc, 
-  setDoc,
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-  addDoc,
-  deleteDoc,
-  serverTimestamp
-} from 'firebase/firestore';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import WalletSkeleton from "@/components/WalletSkeleton";
+import {
+  JsonRpcProvider,
+  formatEther,
+  formatUnits,
+  Contract,
+  parseUnits
+} from 'ethers';
+import { auth, db } from "../../firebase";
 
 const ManageWallet = () => {
-  const [balance, setBalance] = useState(0);
-  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [balances, setBalances] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [transactions, setTransactions] = useState([]);
   const [wallets, setWallets] = useState([]);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
   const [walletLabel, setWalletLabel] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedNetwork, setSelectedNetwork] = useState('all');
+  const [isMobile, setIsMobile] = useState(false);
+  const [transactions, setTransactions] = useState({});
   const [isWalletAvailable, setIsWalletAvailable] = useState({
     MetaMask: false,
-    'Trust Wallet': false,
-    Phantom: false
+    'Trust Wallet': false
   });
 
-  const WALLET_CHAINS = {
-    MetaMask: 'Ethereum',
-    'Trust Wallet': 'Multi-Chain',
-    Phantom: 'Solana'
+  const getEthereumProvider = () => {
+    if (typeof window !== 'undefined' && window.ethereum) {
+      return window.ethereum;
+    }
+    return null;
   };
 
-  useEffect(() => {
-    const initializeWallet = async () => {
-      setLoading(true);
-      try {
-        // Check for wallet providers
-        const checkWalletProviders = async () => {
-          setIsWalletAvailable({
-            MetaMask: !!window.ethereum?.isMetaMask,
-            'Trust Wallet': !!window.ethereum?.isTrust,
-            Phantom: !!window.solana?.isPhantom
-          });
+  const updateBalancesAndTransactions = async () => {
+    try {
+      if (!wallets.length) return;
+    
+      for (const wallet of wallets) {
+        await refreshBalances(wallet);
+      }
+    } catch (error) {
+      console.error('Error updating balances and transactions:', error);
+      setError('Failed to update wallet information');
+    }
+  };
+
+  const SUPPORTED_NETWORKS = {
+    ethereum: {
+      name: 'Ethereum',
+      chainId: '0x1',
+      rpcUrl: 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY',
+      explorer: 'https://etherscan.io',
+      nativeCurrency: {
+        symbol: 'ETH',
+        decimals: 18
+      }
+    },
+    bsc: {
+      name: 'BNB Smart Chain',
+      chainId: '0x38',
+      rpcUrl: 'https://bsc-dataseed.binance.org',
+      explorer: 'https://bscscan.com',
+      nativeCurrency: {
+        symbol: 'BNB',
+        decimals: 18
+      }
+    },
+    polygon: {
+      name: 'Polygon',
+      chainId: '0x89',
+      rpcUrl: 'https://polygon-rpc.com',
+      explorer: 'https://polygonscan.com',
+      nativeCurrency: {
+        symbol: 'MATIC',
+        decimals: 18
+      }
+    }
+  };
+
+  // Common token addresses across networks
+  const COMMON_TOKENS = {
+    ethereum: [
+      { symbol: 'USDT', address: '0xdac17f958d2ee523a2206206994597c13d831ec7' },
+      { symbol: 'USDC', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' },
+      { symbol: 'DAI', address: '0x6b175474e89094c44da98b954eedeac495271d0f' }
+    ],
+    bsc: [
+      { symbol: 'USDT', address: '0x55d398326f99059ff775485246999027b3197955' },
+      { symbol: 'USDC', address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d' },
+      { symbol: 'BUSD', address: '0xe9e7cea3dedca5984780bafc599bd69add087d56' }
+    ],
+    polygon: [
+      { symbol: 'USDT', address: '0xc2132d05d31c914a87c6611c10748aeb04b58e8f' },
+      { symbol: 'USDC', address: '0x2791bca1f2de4661ed88a30c99a7a9449aa84174' },
+      { symbol: 'DAI', address: '0x8f3cf7ad23cd3cadbd9735aff958023239c6a063' }
+    ]
+  };
+
+  const ERC20_ABI = [
+    {
+      name: "balanceOf",
+      type: "function",
+      inputs: [{ name: "owner", type: "address" }],
+      outputs: [{ name: "balance", type: "uint256" }],
+      stateMutability: "view"
+    }
+  ];
+
+  const getNetworkProvider = (network) => {
+    return new JsonRpcProvider(SUPPORTED_NETWORKS[network].rpcUrl);
+  };
+
+  const getNativeBalance = async (walletAddress, network) => {
+    const provider = getNetworkProvider(network);
+    try {
+      const balance = await provider.getBalance(walletAddress);
+      return formatEther(balance);
+    } catch (error) {
+      console.error('Error fetching native balance:', error);
+      return '0';
+    }
+  };
+
+  const getTokenBalance = async (tokenAddress, walletAddress, network) => {
+    const provider = getNetworkProvider(network);
+    const tokenContract = new Contract(tokenAddress, ERC20_ABI, provider);
+    try {
+      const balance = await tokenContract.balanceOf(walletAddress);
+      return formatUnits(balance, 18);
+    } catch (error) {
+      console.error('Error fetching token balance:', error);
+      return '0';
+    }
+  };
+
+  // Update the fetchTransactionHistory function
+  const fetchTransactionHistory = async (address, network) => {
+    const provider = getNetworkProvider(network);
+    try {
+      const blockNumber = await provider.getBlockNumber();
+      const fromBlock = blockNumber - 100; // Get last 100 blocks of history
+      
+      // Get transactions
+      const history = await provider.getBlockWithTransactions(blockNumber);
+      const filtered = history.transactions.filter(tx => 
+        tx.from.toLowerCase() === address.toLowerCase() || 
+        (tx.to && tx.to.toLowerCase() === address.toLowerCase())
+      );
+
+      return filtered.map(tx => ({
+        hash: tx.hash,
+        from: tx.from,
+        to: tx.to,
+        value: formatEther(tx.value),
+        timestamp: new Date().getTime() / 1000, // Current timestamp as fallback
+        status: 1 // Assuming confirmed
+      }));
+    } catch (error) {
+      console.error(`Error fetching transactions for ${network}:`, error);
+      return [];
+    }
+  };
+
+
+  const refreshBalances = async (wallet) => {
+    setRefreshing(true);
+    try {
+      const newBalances = { ...balances };
+      const newTransactions = { ...transactions };
+      newBalances[wallet.address] = {};
+      newTransactions[wallet.address] = {};
+
+      for (const network of Object.keys(SUPPORTED_NETWORKS)) {
+        // Get native currency balance
+        const nativeBalance = await getNativeBalance(wallet.address, network);
+        newBalances[wallet.address][network] = {
+          native: {
+            symbol: SUPPORTED_NETWORKS[network].nativeCurrency.symbol,
+            balance: nativeBalance
+          },
+          tokens: {}
         };
 
-        // Fetch stored wallet data and verify connections
-        await checkWalletProviders();
-        await verifyAndUpdateWallets();
-      } catch (error) {
-        console.error('Error initializing wallet:', error);
-        setError('Failed to initialize wallet');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initializeWallet();
-    checkDeviceType();
-    window.addEventListener('resize', checkDeviceType);
-    return () => window.removeEventListener('resize', checkDeviceType);
-  }, []);
-
-  const checkDeviceType = () => {
-    setIsMobile(window.innerWidth <= 768);
-  };
-
-  const verifyAndUpdateWallets = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        setError('Please sign in to access your wallet');
-        return;
-      }
-
-      // Fetch stored wallets
-      const walletsRef = collection(db, `users/${user.uid}/wallets`);
-      const walletsSnapshot = await getDocs(walletsRef);
-      const storedWallets = walletsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      // Verify each wallet's connection
-      const verifiedWallets = [];
-      for (const wallet of storedWallets) {
-        let isStillConnected = false;
-
-        try {
-          switch (wallet.type) {
-            case 'MetaMask':
-              if (window.ethereum?.isMetaMask) {
-                const accounts = await window.ethereum.request({ 
-                  method: 'eth_accounts' // Use eth_accounts instead of eth_requestAccounts to check without prompting
-                });
-                isStillConnected = accounts.some(
-                  account => account.toLowerCase() === wallet.address.toLowerCase()
-                );
-              }
-              break;
-
-            case 'Trust Wallet':
-              if (window.ethereum?.isTrust) {
-                const accounts = await window.ethereum.request({ 
-                  method: 'eth_accounts'
-                });
-                isStillConnected = accounts.some(
-                  account => account.toLowerCase() === wallet.address.toLowerCase()
-                );
-              }
-              break;
-
-            case 'Phantom':
-              if (window.solana?.isPhantom) {
-                const connected = window.solana.isConnected;
-                const currentAddress = window.solana.publicKey?.toString();
-                isStillConnected = connected && currentAddress === wallet.address;
-              }
-              break;
+        // Get token balances
+        for (const token of COMMON_TOKENS[network]) {
+          const tokenBalance = await getTokenBalance(token.address, wallet.address, network);
+          if (parseFloat(tokenBalance) > 0) {
+            newBalances[wallet.address][network].tokens[token.symbol] = tokenBalance;
           }
-
-          if (isStillConnected) {
-            verifiedWallets.push(wallet);
-          } else {
-            // Remove disconnected wallet from database
-            await deleteDoc(doc(db, `users/${user.uid}/wallets/${wallet.id}`));
-          }
-        } catch (err) {
-          console.error(`Error verifying ${wallet.type} connection:`, err);
-          // Remove wallet if verification fails
-          await deleteDoc(doc(db, `users/${user.uid}/wallets/${wallet.id}`));
         }
+
+        // Get transaction history
+        const txHistory = await fetchTransactionHistory(wallet.address, network);
+        newTransactions[wallet.address][network] = txHistory;
       }
 
-      setWallets(verifiedWallets);
-      await fetchUserData();
-    } catch (err) {
-      console.error('Error verifying wallets:', err);
-      setError('Failed to verify wallet connections');
+      setBalances(newBalances);
+      setTransactions(newTransactions);
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      setError('Failed to refresh wallet data');
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  const fetchUserData = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        setError('Please sign in to access your wallet');
-        setLoading(false);
-        return;
-      }
-
-      // Create user document if it doesn't exist
-      const userDocRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userDocRef);
-      
-      if (!userDoc.exists()) {
-        await setDoc(userDocRef, {
-          walletBalance: 0,
-          createdAt: serverTimestamp(),
-          email: user.email
-        });
-      }
-
-      // Fetch user's wallets
-      const walletsRef = collection(db, `users/${user.uid}/wallets`);
-      const walletsSnapshot = await getDocs(walletsRef);
-      const walletsData = walletsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setWallets(walletsData);
-
-      // Fetch user's balance
-      if (userDoc.exists()) {
-        setBalance(userDoc.data().walletBalance || 0);
-      }
-
-      await fetchTransactions();
-      setLoading(false);
-    } catch (err) {
-      console.error('Error fetching user data:', err);
-      setError('Failed to fetch wallet data');
-      setLoading(false);
-    }
+  const TransactionHistory = ({ wallet, network }) => {
+    const txs = transactions[wallet.address]?.[network] || [];
+    
+    return (
+      <div className="mt-4 space-y-2">
+        <h3 className="font-semibold flex items-center gap-2">
+          <Clock className="h-4 w-4" />
+          Transaction History
+        </h3>
+        {txs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No transactions found</p>
+        ) : (
+          <div className="space-y-2">
+            {txs.map((tx) => (
+              <div key={tx.hash} className="p-2 rounded-lg bg-secondary/20">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">
+                    {formatAddress(tx.from)} → {formatAddress(tx.to)}
+                  </span>
+                  <span className="text-sm">
+                    {parseFloat(tx.value).toFixed(4)} {SUPPORTED_NETWORKS[network].nativeCurrency.symbol}
+                  </span>
+                </div>
+                <a
+                  href={`${SUPPORTED_NETWORKS[network].explorer}/tx/${tx.hash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-muted-foreground hover:text-primary flex items-center mt-1"
+                >
+                  View Transaction <ExternalLink className="h-3 w-3 ml-1" />
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
-  const fetchTransactions = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      const transactionsRef = collection(db, `users/${user.uid}/transactions`);
-      const q = query(
-        transactionsRef,
-        orderBy('timestamp', 'desc'),
-        limit(10)
-      );
-      
-      const querySnapshot = await getDocs(q);
-      const txs = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
-      }));
-      setTransactions(txs);
-    } catch (err) {
-      console.error('Error fetching transactions:', err);
-      setError('Failed to fetch transaction history');
-    }
+  const WalletCard = ({ wallet }) => {
+    const walletBalances = balances[wallet.address] || {};
+    const [isExpanded, setIsExpanded] = useState(false);
+    
+    return (
+      <Card className="shadow-lg hover:shadow-xl transition-shadow duration-200">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-primary" />
+                {wallet.label}
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => refreshBalances(wallet)}
+                disabled={refreshing}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => disconnectWallet(wallet.id)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Disconnect Wallet
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+          <CardDescription className="flex items-center gap-2">
+            <span>{wallet.type} • Multi-Chain</span>
+            <div className="flex-1" />
+            <span className="text-xs text-muted-foreground">
+              {formatAddress(wallet.address)}
+            </span>
+          </CardDescription>
+        </CardHeader>
+  
+        <CardContent>
+          <Tabs defaultValue="all" className="w-full" value={selectedNetwork}>
+            <TabsList className="w-full grid grid-cols-4">
+              <TabsTrigger value="all" onClick={() => setSelectedNetwork('all')}>
+                All
+              </TabsTrigger>
+              {Object.keys(SUPPORTED_NETWORKS).map(network => (
+                <TabsTrigger 
+                  key={network} 
+                  value={network}
+                  onClick={() => setSelectedNetwork(network)}
+                >
+                  {SUPPORTED_NETWORKS[network].name}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+  
+            <TabsContent value="all" className="space-y-4 mt-4">
+              {Object.entries(walletBalances).map(([network, data]) => (
+                <div key={network} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm">
+                      {SUPPORTED_NETWORKS[network].name}
+                    </h3>
+                    <a 
+                      href={`${SUPPORTED_NETWORKS[network].explorer}/address/${wallet.address}`}
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-xs text-muted-foreground hover:text-primary flex items-center"
+                    >
+                      View on Explorer
+                      <ExternalLink className="h-3 w-3 ml-1" />
+                    </a>
+                  </div>
+  
+                  <div className="space-y-1 bg-secondary/10 rounded-lg p-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">{data.native.symbol}</span>
+                      <span className="text-sm">
+                        {parseFloat(data.native.balance).toFixed(4)}
+                      </span>
+                    </div>
+                    {Object.entries(data.tokens || {}).map(([symbol, balance]) => (
+                      <div key={symbol} className="flex justify-between items-center">
+                        <span className="text-sm">{symbol}</span>
+                        <span className="text-sm">{parseFloat(balance).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+  
+                  <TransactionHistory 
+                    wallet={wallet} 
+                    network={network}
+                    isExpanded={isExpanded}
+                  />
+                </div>
+              ))}
+            </TabsContent>
+  
+            {Object.keys(SUPPORTED_NETWORKS).map(network => (
+              <TabsContent key={network} value={network} className="space-y-4 mt-4">
+                {walletBalances[network] && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-sm">
+                        {SUPPORTED_NETWORKS[network].name} Balance
+                      </h3>
+                      <a 
+                        href={`${SUPPORTED_NETWORKS[network].explorer}/address/${wallet.address}`}
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-xs text-muted-foreground hover:text-primary flex items-center"
+                      >
+                        View on Explorer
+                        <ExternalLink className="h-3 w-3 ml-1" />
+                      </a>
+                    </div>
+  
+                    <div className="space-y-1 bg-secondary/10 rounded-lg p-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium">
+                          {walletBalances[network].native.symbol}
+                        </span>
+                        <span className="text-sm">
+                          {parseFloat(walletBalances[network].native.balance).toFixed(4)}
+                        </span>
+                      </div>
+                      {Object.entries(walletBalances[network].tokens || {}).map(([symbol, balance]) => (
+                        <div key={symbol} className="flex justify-between items-center">
+                          <span className="text-sm">{symbol}</span>
+                          <span className="text-sm">{parseFloat(balance).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+  
+                    <TransactionHistory 
+                      wallet={wallet} 
+                      network={network}
+                      isExpanded={isExpanded}
+                    />
+                  </>
+                )}
+              </TabsContent>
+            ))}
+          </Tabs>
+  
+          <div className="mt-4 flex justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-xs"
+            >
+              {isExpanded ? 'Show Less' : 'Show More'}
+              <ChevronDown className={`h-4 w-4 ml-1 transform transition-transform duration-200 ${
+                isExpanded ? 'rotate-180' : ''
+              }`} />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   const connectWallet = async (walletType) => {
@@ -248,46 +457,35 @@ const ManageWallet = () => {
       return;
     }
 
-    if (!isWalletAvailable[walletType]) {
-      setError(`${walletType} is not installed`);
-      return;
-    }
-
     setIsConnecting(true);
     try {
-      let address;
-
-      switch (walletType) {
-        case 'MetaMask':
-          const isMetaMask = window.ethereum?.isMetaMask;
-          if (!window.ethereum || !isMetaMask) {
-            throw new Error('MetaMask is not installed');
-          }
-          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-          address = accounts[0];
-          break;
-          
-        case 'Trust Wallet':
-          const isTrust = window.ethereum?.isTrust;
-          if (!window.ethereum || !isTrust) {
-            throw new Error('Trust Wallet is not installed');
-          }
-          const trustAccounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-          address = trustAccounts[0];
-          break;
-          
-        case 'Phantom':
-          if (!window.solana?.isPhantom) {
-            throw new Error('Phantom Wallet is not installed');
-          }
-          const response = await window.solana.connect();
-          address = response.publicKey.toString();
-          break;
-          
-        default:
-          throw new Error('Unsupported wallet type');
+      const provider = getEthereumProvider();
+      if (!provider) {
+        throw new Error('No provider available');
       }
 
+      let address;
+      
+      // Check if correct wallet is selected
+      const isCorrectWallet = (walletType === 'MetaMask' && provider.isMetaMask) ||
+                             (walletType === 'Trust Wallet' && provider.isTrust);
+                             
+      if (!isCorrectWallet) {
+        throw new Error(`Please select ${walletType} in your browser`);
+      }
+
+      // Request account access
+      const accounts = await provider.request({ 
+        method: 'eth_requestAccounts' 
+      });
+      
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts found');
+      }
+      
+      address = accounts[0];
+
+      // Check for duplicate wallet
       if (wallets.some(w => w.address.toLowerCase() === address.toLowerCase())) {
         throw new Error('This wallet is already connected');
       }
@@ -295,6 +493,7 @@ const ManageWallet = () => {
       const user = auth.currentUser;
       if (!user) throw new Error('User not authenticated');
 
+      // Add wallet to database
       const walletsRef = collection(db, `users/${user.uid}/wallets`);
       await addDoc(walletsRef, {
         type: walletType,
@@ -306,14 +505,14 @@ const ManageWallet = () => {
       });
 
       setSuccess(`${walletType} wallet connected successfully!`);
-      await fetchUserData();
+      await verifyAndUpdateWallets();
       setWalletLabel('');
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Failed to connect wallet');
     } finally {
       setIsConnecting(false);
     }
-};
+  };
 
   const disconnectWallet = async (walletId) => {
     try {
@@ -322,102 +521,97 @@ const ManageWallet = () => {
 
       await deleteDoc(doc(db, `users/${user.uid}/wallets/${walletId}`));
       setSuccess('Wallet disconnected successfully');
-      await fetchUserData();
+      await verifyAndUpdateWallets();
     } catch (err) {
       setError('Failed to disconnect wallet');
     }
   };
 
-  const handleWithdraw = async () => {
-    setError('');
-    setSuccess('');
-
-    if (wallets.length === 0) {
-      setError('Please connect at least one wallet first');
-      return;
-    }
-
-    if (!withdrawAmount) {
-      setError('Please enter an amount to withdraw');
-      return;
-    }
-
-    const amount = parseFloat(withdrawAmount);
-    if (isNaN(amount) || amount <= 0) {
-      setError('Please enter a valid amount');
-      return;
-    }
-
-    if (amount > balance) {
-      setError('Insufficient balance');
-      return;
-    }
-
+  const verifyAndUpdateWallets = async () => {
     try {
-      setLoading(true);
       const user = auth.currentUser;
-      if (!user) throw new Error('User not authenticated');
+      if (!user) {
+        setError('Please sign in to access your wallet');
+        return;
+      }
 
-      const batch = db.batch();
+      const walletsRef = collection(db, `users/${user.uid}/wallets`);
+      const walletsSnapshot = await getDocs(walletsRef);
+      const storedWallets = walletsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
 
-      // Create transaction document
-      const transactionRef = doc(collection(db, `users/${user.uid}/transactions`));
-      batch.set(transactionRef, {
-        userId: user.uid,
-        type: 'withdrawal',
-        amount: amount,
-        description: `Withdrawal to ${wallets[0].label} (${wallets[0].type})`,
-        timestamp: serverTimestamp(),
-        walletAddress: wallets[0].address,
-        walletType: wallets[0].type,
-        status: 'completed'
-      });
+      setWallets(storedWallets);
 
-      // Update user's balance
-      const userRef = doc(db, 'users', user.uid);
-      batch.update(userRef, {
-        walletBalance: balance - amount
-      });
-
-      await batch.commit();
-      setSuccess(`Successfully withdrew $${amount.toFixed(2)}`);
-      await fetchUserData();
-      setWithdrawAmount('');
+      if (storedWallets.length > 0) {
+        await updateBalancesAndTransactions();
+      }
     } catch (err) {
-      console.error('Withdrawal error:', err);
-      setError('Failed to process withdrawal. Please try again.');
-    } finally {
-      setLoading(false);
+      console.error('Error verifying wallets:', err);
+      setError('Failed to verify wallet connections');
     }
   };
+
   useEffect(() => {
-    const handleAccountsChanged = () => {
-      verifyAndUpdateWallets();
+    const checkWalletProviders = () => {
+      const provider = getEthereumProvider();
+      setIsWalletAvailable({
+        MetaMask: !!provider?.isMetaMask,
+        'Trust Wallet': !!provider?.isTrust
+      });
     };
 
-    const handleChainChanged = () => {
-      verifyAndUpdateWallets();
+    const initializeWallet = async () => {
+      setLoading(true);
+      try {
+        checkWalletProviders();
+        await verifyAndUpdateWallets();
+      } catch (error) {
+        console.error('Error initializing wallet:', error);
+        setError('Failed to initialize wallet');
+      } finally {
+        setLoading(false);
+      }
     };
 
-    if (window.ethereum) {
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('chainChanged', handleChainChanged);
-    }
+    initializeWallet();
+    setIsMobile(window.innerWidth <= 768);
 
-    if (window.solana) {
-      window.solana.on('disconnect', handleAccountsChanged);
-      window.solana.on('accountChanged', handleAccountsChanged);
-    }
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    
+    // Set up periodic updates
+    const updateInterval = setInterval(() => {
+      if (wallets.length > 0) {
+        updateBalancesAndTransactions();
+      }
+    }, 30000); // Update every 30 seconds
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearInterval(updateInterval);
+    };
+  }, [wallets.length]);
+
+  useEffect(() => {
+    const provider = getEthereumProvider();
+    if (!provider) return;
+
+    const handleAccountsChanged = async () => {
+      await verifyAndUpdateWallets();
+    };
+
+    const handleChainChanged = async () => {
+      await verifyAndUpdateWallets();
+    };
+
+    provider.on('accountsChanged', handleAccountsChanged);
+    provider.on('chainChanged', handleChainChanged);
 
     return () => {
-      if (window.ethereum) {
-        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-        window.ethereum.removeListener('chainChanged', handleChainChanged);
-      }
-      if (window.solana) {
-        window.solana.removeListener('disconnect', handleAccountsChanged);
-        window.solana.removeListener('accountChanged', handleAccountsChanged);
-      }
+      provider.removeListener('accountsChanged', handleAccountsChanged);
+      provider.removeListener('chainChanged', handleChainChanged);
     };
   }, []);
 
@@ -438,214 +632,62 @@ const ManageWallet = () => {
       </h1>
 
       {error && (
-        <Alert variant="destructive" className="mb-4">
+        <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
       {success && (
-        <Alert className="mb-4 bg-green-500/10 text-green-500 dark:bg-green-500/20">
+        <Alert className="bg-green-500/10 text-green-500 dark:bg-green-500/20">
           <AlertDescription>{success}</AlertDescription>
         </Alert>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="shadow-lg md:col-span-2">
-          <CardHeader>
-            <CardTitle>Available Balance</CardTitle>
-            <CardDescription>Your current wallet balance</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-primary">${balance.toFixed(2)}</div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-6">
+        {wallets.map((wallet) => (
+          <WalletCard key={wallet.id} wallet={wallet} />
+        ))}
 
-        <Card className="shadow-lg md:col-span-2">
-          <CardHeader>
-            <CardTitle>Connected Wallets ({wallets.length}/2)</CardTitle>
-            <CardDescription>
-              Connect up to two cryptocurrency wallets
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {wallets.length > 0 && (
-              <div className="space-y-4">
-                {wallets.map((wallet) => (
-                  <div
-                    key={wallet.id}
-                    className="flex items-center justify-between p-4 rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="text-2xl">{
-                        wallet.type === 'MetaMask' ? '🦊' :
-                        wallet.type === 'Trust Wallet' ? '💎' :
-                        wallet.type === 'Phantom' ? '👻' : '💳'
-                      }</div>
-                      <div>
-                        <div className="font-medium">{wallet.label}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {wallet.type} • {wallet.chain}
-                        </div>
-                        <div className="text-sm text-muted-foreground flex items-center gap-1">
-                          {formatAddress(wallet.address)}
-                          <ExternalLink className="h-3 w-3" />
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive hover:text-destructive/90 hover:bg-destructive/10"
-                      onClick={() => disconnectWallet(wallet.id)}
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {wallets.length < 2 && (
-              <>
-                <Separator className="my-6" />
-                
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="wallet-label">Wallet Label</Label>
-                    <Input
-                      id="wallet-label"
-                      placeholder="Enter a name for this wallet"
-                      value={walletLabel}
-                      onChange={(e) => setWalletLabel(e.target.value)}
-                      maxLength={30}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Button
-                      className="w-full bg-orange-500 hover:bg-orange-600 text-white dark:bg-orange-600 dark:hover:bg-orange-700"
-                      onClick={() => connectWallet('MetaMask')}
-                      disabled={isConnecting}
-                    >
-                      <span className="mr-2">🦊</span>
-                      Connect MetaMask
-                    </Button>
-                    <Button
-                      className="w-full bg-blue-500 hover:bg-blue-600 text-white dark:bg-blue-600 dark:hover:bg-blue-700"
-                      onClick={() => connectWallet('Trust Wallet')}
-                      disabled={isConnecting}
-                    >
-                      <span className="mr-2">💎</span>
-                      Connect Trust Wallet
-                    </Button>
-                    {isMobile && (
-                      <Button
-                        className="w-full bg-purple-500 hover:bg-purple-600 text-white dark:bg-purple-600 dark:hover:bg-purple-700 md:col-span-2"
-                        onClick={() => connectWallet('Phantom')}
-                        disabled={isConnecting}
-                      >
-                        <span className="mr-2">👻</span>
-                        Connect Phantom
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-lg md:col-span-2">
-          <CardHeader>
-            <CardTitle>Recent Transactions</CardTitle>
-            <CardDescription>Your latest wallet activity</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {transactions.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No transactions found
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {transactions.map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                    {tx.type === 'credit' ? (
-                        <ArrowDownRight className="h-5 w-5 text-green-500" />
-                      ) : (
-                        <ArrowUpRight className="h-5 w-5 text-red-500" />
-                      )}
-                      <div>
-                        <div className="font-medium">{tx.description}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {new Date(tx.timestamp).toLocaleDateString()} • {tx.status}
-                        </div>
-                        {tx.walletAddress && (
-                          <div className="text-sm text-muted-foreground flex items-center gap-1">
-                            {formatAddress(tx.walletAddress)}
-                            <ExternalLink className="h-3 w-3" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className={`font-medium ${
-                      tx.type === 'credit' ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400'
-                    }`}>
-                      {tx.type === 'credit' ? '+' : '-'}${tx.amount.toFixed(2)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {wallets.length > 0 && (
-          <Card className="shadow-lg md:col-span-2">
+        {wallets.length < 2 && (
+          <Card className="shadow-lg">
             <CardHeader>
-              <CardTitle>Withdraw Funds</CardTitle>
+              <CardTitle>Connect Wallet</CardTitle>
               <CardDescription>
-                Transfer funds to your connected wallet
+                Connect your cryptocurrency wallet to view balances across multiple chains
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="withdraw-amount">Amount (USD)</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                    <Input
-                      id="withdraw-amount"
-                      type="number"
-                      placeholder="0.00"
-                      className="pl-8"
-                      value={withdrawAmount}
-                      onChange={(e) => setWithdrawAmount(e.target.value)}
-                    />
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Available balance: ${balance.toFixed(2)}
-                  </p>
+                  <Label htmlFor="wallet-label">Wallet Label</Label>
+                  <Input
+                    id="wallet-label"
+                    placeholder="Enter a name for this wallet"
+                    value={walletLabel}
+                    onChange={(e) => setWalletLabel(e.target.value)}
+                    maxLength={30}
+                  />
                 </div>
 
-                <Button
-                  className="w-full"
-                  onClick={handleWithdraw}
-                  disabled={loading || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || parseFloat(withdrawAmount) > balance}
-                >
-                  {loading ? (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    'Withdraw to Wallet'
-                  )}
-                </Button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Button
+                    className="w-full bg-orange-500 hover:bg-orange-600 text-white"
+                    onClick={() => connectWallet('MetaMask')}
+                    disabled={isConnecting}
+                  >
+                    <span className="mr-2">🦊</span>
+                    Connect MetaMask
+                  </Button>
+                  <Button
+                    className="w-full bg-blue-500 hover:bg-blue-600 text-white"
+                    onClick={() => connectWallet('Trust Wallet')}
+                    disabled={isConnecting}
+                  >
+                    <span className="mr-2">💎</span>
+                    Connect Trust Wallet
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react';
-import { getFirestore, collection, addDoc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { setDoc, collection, doc, getDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
@@ -139,11 +139,10 @@ const ListService = () => {
       setUploadingImage(true);
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
-      formData.append('cloud_name', process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME);
+      formData.append('upload_preset', 'Domnix-Blog');
 
       const response = await fetch(
-        `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
+        `https://api.cloudinary.com/v1_1/dwkxh75ux/image/upload`,
         {
           method: 'POST',
           body: formData,
@@ -282,14 +281,14 @@ const ListService = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
-
+  
     try {
       const user = auth.currentUser;
       if (!user) {
         setError('Please sign in to publish your service');
         return;
       }
-
+  
       let imageUrl = '';
       if (profileImage) {
         try {
@@ -299,7 +298,7 @@ const ListService = () => {
           return;
         }
       }
-
+  
       const selectedWalletData = connectedWallets.find(w => w.id === selectedWallet);
       
       const serviceData = {
@@ -317,10 +316,21 @@ const ListService = () => {
         availability,
         createdAt: new Date().toISOString(),
       };
-
-      const servicesRef = collection(db, 'services');
-      await addDoc(servicesRef, serviceData);
-
+  
+      // Create a reference to the specific user's service document
+      const userServiceRef = doc(db, 'services', user.uid);
+      
+      // Check if document exists first
+      const docSnap = await getDoc(userServiceRef);
+      
+      if (docSnap.exists()) {
+        // Update existing service
+        await updateDoc(userServiceRef, serviceData);
+      } else {
+        // Create new service
+        await setDoc(userServiceRef, serviceData);
+      }
+  
       setSuccess(true);
       setFormData({
         title: '',
@@ -335,7 +345,11 @@ const ListService = () => {
       setImagePreview(null);
     } catch (err) {
       console.error('Error saving service:', err);
-      setError('Failed to save service. Please try again.');
+      if (err.code === 'permission-denied') {
+        setError('You do not have permission to publish this service. Please check your authentication status.');
+      } else {
+        setError('Failed to save service. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
