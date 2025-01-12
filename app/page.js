@@ -1,39 +1,78 @@
 "use client"
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, ChevronRight, Star, Video, Calendar, Clock, Shield } from 'lucide-react';
+import { collection, query, limit, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const Hero = () => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [featuredDevs, setFeaturedDevs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const developers = [
-    {
-      id: 1,
-      name: 'Sarah Chen',
-      skill: 'Full Stack Developer',
-      skills: ['React', 'Node.js', 'Python', 'AWS'],
-      rate: 150,
-      rating: 4.9,
-      availability: 'Available Now'
-    },
-    {
-      id: 2,
-      name: 'Mike Johnson',
-      skill: 'React Specialist',
-      skills: ['React', 'TypeScript', 'Next.js', 'TailwindCSS'],
-      rate: 125,
-      rating: 4.8,
-      availability: 'Available in 2 hours'
-    },
-    {
-      id: 3,
-      name: 'Alex Kumar',
-      skill: 'Cloud Architect',
-      skills: ['AWS', 'Docker', 'Kubernetes', 'DevOps'],
-      rate: 175,
-      rating: 4.9,
-      availability: 'Available Today'
+  useEffect(() => {
+    try {
+      const servicesRef = collection(db, 'services');
+      const featuredQuery = query(servicesRef, limit(3));
+
+      const unsubscribe = onSnapshot(featuredQuery, (snapshot) => {
+        const developersData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          status: isAvailableNow(doc.data().availability) ? 'online' : 'away',
+          availabilityString: getAvailabilityString(doc.data().availability)
+        }));
+        setFeaturedDevs(developersData);
+        setLoading(false);
+      }, (err) => {
+        console.error("Error fetching developers:", err);
+        setError("Failed to load featured developers");
+        setLoading(false);
+      });
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("Error setting up developers listener:", err);
+      setError("Failed to initialize featured developers");
+      setLoading(false);
     }
-  ];
+  }, []);
+
+  const isAvailableNow = (availability) => {
+    if (!availability) return false;
+    
+    const now = new Date();
+    const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    const time = now.getHours().toString().padStart(2, '0') + ':' + 
+                 now.getMinutes().toString().padStart(2, '0');
+    
+    const dayAvailability = availability[day];
+    if (!dayAvailability?.isAvailable) return false;
+    
+    return dayAvailability.slots.some(slot => 
+      time >= slot.start && time <= slot.end
+    );
+  };
+
+  const getAvailabilityString = (availability) => {
+    if (!availability) return "Not Available";
+    
+    const now = new Date();
+    const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    
+    if (isAvailableNow(availability)) {
+      return "Available Now";
+    }
+
+    const todaySlots = availability[day]?.slots || [];
+    const time = now.getHours().toString().padStart(2, '0') + ':' + 
+                 now.getMinutes().toString().padStart(2, '0');
+    
+    const laterToday = todaySlots.some(slot => slot.start > time);
+    if (laterToday) return "Available Today";
+    
+    return "Available This Week";
+  };
 
   const features = [
     {
@@ -61,7 +100,6 @@ const Hero = () => {
   return (
     <section className="bg-white dark:bg-black mt-12">
       <div className="max-w-6xl mx-auto px-6">
-        {/* Hero Section */}
         <div className="pt-20 pb-16">
           <div className="text-center max-w-3xl mx-auto mb-16">
             <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-6">
@@ -71,7 +109,6 @@ const Hero = () => {
               Access skilled developers for on-demand video calls at your convenience.
             </p>
 
-            {/* Search Bar */}
             <div className="relative mb-8">
               <Search className="absolute left-4 top-3.5 text-gray-400" size={20} />
               <input
@@ -83,7 +120,6 @@ const Hero = () => {
               />
             </div>
 
-            {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <button className="px-8 py-3.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transform hover:scale-105 transition-all flex items-center justify-center">
                 Book Now
@@ -95,49 +131,66 @@ const Hero = () => {
             </div>
           </div>
 
-          {/* Developer Cards */}
           <div className="grid md:grid-cols-3 gap-6 mb-20">
-            {developers.map((dev) => (
-              <div
-                key={dev.id}
-                className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer bg-white dark:bg-gray-800"
-              >
-                <div className="flex items-start gap-4">
-                  <div className="w-14 h-14 rounded-full bg-blue-50 dark:bg-blue-900 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-lg shrink-0">
-                    {dev.name.split(' ').map(n => n[0]).join('')}
-                  </div>
-                  <div className="space-y-3 w-full">
-                    <div>
-                      <div className="flex justify-between items-start">
-                        <h3 className="font-semibold text-gray-900 dark:text-white">{dev.name}</h3>
-                        <span className="text-sm font-medium text-blue-600 dark:text-blue-400">${dev.rate}/hr</span>
+            {loading ? (
+              <div className="col-span-3 flex justify-center py-12">
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            ) : error ? (
+              <div className="col-span-3 text-center py-12 text-red-500">{error}</div>
+            ) : (
+              featuredDevs.map((dev) => (
+                <div
+                  key={dev.id}
+                  className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer bg-white dark:bg-gray-800"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="relative">
+                      <img
+                        src={dev.imageUrl || '/api/placeholder/56/56'}
+                        alt={dev.title}
+                        className="w-14 h-14 rounded-full object-cover"
+                      />
+                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                        dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
+                      }`} />
+                    </div>
+                    <div className="space-y-3 w-full">
+                      <div>
+                        <div className="flex justify-between items-start">
+                          <h3 className="font-semibold text-gray-900 dark:text-white">{dev.title}</h3>
+                          <span className="text-sm font-medium text-blue-600 dark:text-blue-400">${dev.rate}/hr</span>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-300 text-sm">{dev.description}</p>
                       </div>
-                      <p className="text-gray-600 dark:text-gray-300 text-sm">{dev.skill}</p>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <Star size={16} className="text-yellow-400 fill-current" />
-                      <span className="text-sm text-gray-600 dark:text-gray-300">{dev.rating}</span>
-                      <span className="text-sm text-green-600 dark:text-green-400 ml-auto">{dev.availability}</span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {dev.skills.map((skill, index) => (
-                        <span
-                          key={index}
-                          className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
-                        >
-                          {skill}
+                      
+                      <div className="flex items-center gap-2">
+                        <Star size={16} className="text-yellow-400 fill-current" />
+                        <span className="text-sm text-gray-600 dark:text-gray-300">{dev.rating}</span>
+                        <span className={`text-sm ml-auto ${
+                          dev.status === 'online' ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'
+                        }`}>
+                          {dev.availabilityString}
                         </span>
-                      ))}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {dev.skills?.slice(0, 4).map((skill, index) => (
+                          <span
+                            key={index}
+                            className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium"
+                          >
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
 
-          {/* Features Section */}
           <div className="border-t border-gray-100 dark:border-gray-800 pt-16">
             <div className="text-center mb-12">
               <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Why Choose BookMyDev?</h2>

@@ -30,6 +30,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useRouter } from 'next/navigation';
 
 const DevelopersPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,7 +43,7 @@ const DevelopersPage = () => {
   const [developers, setDevelopers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
+  const router = useRouter();
   // Fetch developers from Firebase
   useEffect(() => {
     try {
@@ -440,7 +441,10 @@ const getAvailabilityString = (availability) => {
                                 {dev.timezone}
                               </span>
                             </div>
-                            <button className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors mb-4">
+                            <button 
+                              onClick={() => router.push(`/Developers/${dev.id}`)}
+                              className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors mb-4"
+                            >
                               Book Now
                             </button>
                           </div>
@@ -475,8 +479,9 @@ const getAvailabilityString = (availability) => {
                             </div>
                           </div>
 
-                          {/* Rate and Availability */}
+                          {/* Rate, Availability and Wallet */}
                           <div className="flex flex-wrap gap-6">
+                            {/* Rate Section */}
                             <div>
                               <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                                 Hourly Rate
@@ -485,27 +490,69 @@ const getAvailabilityString = (availability) => {
                                 ${dev.rate}/hr
                               </p>
                             </div>
+
+                            {/* Availability Section */}
                             <div>
                               <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                                 Availability
                               </h4>
-                              <p className="text-sm">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className={`w-2 h-2 rounded-full ${
-                                    dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
-                                  }`} />
-                                  <span className="text-gray-900 dark:text-white">
-                                    {dev.availabilityString}
-                                  </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${
+                                  dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
+                                }`} />
+                                <span className="text-gray-900 dark:text-white">
+                                  {dev.availabilityString}
                                 </span>
-                              </p>
+                              </div>
+                            </div>
+
+                            {/* Wallet Section */}
+                            <div className="flex-1 min-w-[200px]">
+                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Payment Method
+                              </h4>
+                              {dev.walletConnected && dev.walletInfo ? (
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-gray-900 dark:text-white font-medium">
+                                      {dev.walletInfo.type}
+                                    </span>
+                                    <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                                      {dev.walletInfo.address.slice(0, 6)}...{dev.walletInfo.address.slice(-4)}
+                                    </span>
+                                  </div>
+                                  <button 
+                                    onClick={() => navigator.clipboard.writeText(dev.walletInfo.address)}
+                                    className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 p-1 rounded-md transition-colors"
+                                    title="Copy wallet address"
+                                  >
+                                    <svg 
+                                      className="w-4 h-4" 
+                                      fill="none" 
+                                      viewBox="0 0 24 24" 
+                                      stroke="currentColor"
+                                    >
+                                      <path 
+                                        strokeLinecap="round" 
+                                        strokeLinejoin="round" 
+                                        strokeWidth={2} 
+                                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" 
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  No wallet connected
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
                   ))}
-              </div>
+            </div>
             )}
             </div>
 
