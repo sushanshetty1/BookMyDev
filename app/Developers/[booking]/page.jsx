@@ -227,12 +227,8 @@ const [bypassPayment, setBypassPayment] = useState(false);
     setSelectedDate(now);
     setIsTestMode(true);
     setSelectedSlot(null);
-    
-    // Get the current hour
     const currentHour = now.getHours();
     const nextHour = currentHour + 1;
-    
-    // Create a time slot for the next hour
     const testSlot = {
       start: `${currentHour.toString().padStart(2, '0')}:00`,
       end: `${nextHour.toString().padStart(2, '0')}:00`
@@ -250,27 +246,16 @@ const [bypassPayment, setBypassPayment] = useState(false);
       setIsTestMode(false);
       return;
     }
-    
-    // Get today's date for comparison
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const isTestDate = date.toDateString() === today.toDateString();
-    
-    if (isTestDate) {
-      // For test dates, use current time
-      const now = new Date();
-      date = now;
-    }
+    const selectedDay = new Date(date);
+    selectedDay.setHours(0, 0, 0, 0);
+    const isSelectedToday = selectedDay.getTime() === today.getTime();
     
     setSelectedDate(date);
     setSelectedSlot(null);
-    setIsTestMode(isTestDate);
-    
-    if (selectedSlot) {
-      setIsToday(isCurrentSession(date, selectedSlot));
-    } else {
-      setIsToday(false);
-    }
+    setIsTestMode(false);
+    setIsToday(isSelectedToday);
   };
 
   const isDateDisabled = (date) => {
@@ -394,6 +379,40 @@ const [bypassPayment, setBypassPayment] = useState(false);
     } else {
       setError('Please install MetaMask to continue');
     }
+  };
+
+  const getBookingButtonText = () => {
+    if (submitting) {
+      return (
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          Processing...
+        </div>
+      );
+    }
+    if (isTestMode) {
+      return 'Start Test Session';
+    }
+    if (isToday) {
+      return 'Book and Pay Now';
+    }
+    return 'Book Session';
+  };
+
+  const isBookingButtonDisabled = () => {
+    if (!selectedDate || !selectedSlot || !termsAccepted || submitting) {
+      return true;
+    }
+
+    if (isTestMode) {
+      return !bypassPayment;
+    }
+    
+    if (isToday && !isTestMode) {
+      return !walletConnected;
+    }
+    
+    return false;
   };
 
   const processPayment = async () => {
@@ -872,20 +891,9 @@ const handleSubmit = async (e) => {
                       <Button
                         type="submit"
                         className="w-full h-12 text-lg bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white transition-all duration-200 disabled:opacity-50"
-                        disabled={
-                          !selectedDate || 
-                          !selectedSlot || 
-                          (!walletConnected && isToday && !bypassPayment) || 
-                          !termsAccepted || 
-                          submitting
-                        }
+                        disabled={isBookingButtonDisabled()}
                       >
-                        {submitting ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            Processing...
-                          </div>
-                        ) : isTestMode ? 'Start Test Session' : isToday ? 'Book and Pay Now' : 'Book Session'}
+                        {getBookingButtonText()}
                       </Button>
                     </div>
                   </form>

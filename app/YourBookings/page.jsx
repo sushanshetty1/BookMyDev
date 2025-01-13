@@ -1,5 +1,5 @@
 "use client"
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { useRouter } from 'next/navigation';
@@ -7,6 +7,8 @@ import { BrowserProvider, ethers } from 'ethers';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 const VideoConference = dynamic(() => import('@/components/VideoConference'), { ssr: false });
+import { MessageSquare } from 'lucide-react';
+import ChatComponent from '@/components/ChatComponent';
 
 import {
   Card,
@@ -58,9 +60,9 @@ import {
   AlertTriangle,
   ExternalLink
 } from 'lucide-react';
-import Image from 'next/image';
 
 const MATIC_TO_USD = 0.8;
+const POLYGON_CHAIN_ID = '0x89';
 
 const YourBookings = () => {
   const router = useRouter();
@@ -70,6 +72,8 @@ const YourBookings = () => {
   const [showVideoConference, setShowVideoConference] = useState(false);
   const [activeSession, setActiveSession] = useState(null);
   const [walletConnected, setWalletConnected] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [activeChatBooking, setActiveChatBooking] = useState(null);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [maticBalance, setMaticBalance] = useState(null);
   const upcomingBookings = bookings.filter(booking => new Date(booking.date) >= new Date());
@@ -80,6 +84,220 @@ const YourBookings = () => {
     fetchBookings();
     checkWalletConnection();
   }, []);
+
+  const isChatAvailable = (bookingDate, timeSlot) => {
+    const now = new Date();
+    const sessionDate = new Date(bookingDate);
+    const [bookingHour] = timeSlot.start.split(':').map(Number);
+    sessionDate.setHours(bookingHour, 0, 0, 0);
+  
+    const chatWindowStart = new Date(sessionDate);
+    chatWindowStart.setMinutes(chatWindowStart.getMinutes() - 30);
+  
+    const chatWindowEnd = new Date(sessionDate);
+    chatWindowEnd.setHours(chatWindowEnd.getHours() + 1);
+    chatWindowEnd.setMinutes(chatWindowEnd.getMinutes() + 30);
+  
+    return now >= chatWindowStart && now <= chatWindowEnd;
+  };
+
+  const categorizeBookings = (bookings) => {
+    const now = new Date();
+    
+    return bookings.reduce((acc, booking) => {
+      const sessionDate = new Date(booking.date);
+      const [bookingHour] = booking.timeSlot.start.split(':').map(Number);
+      sessionDate.setHours(bookingHour, 0, 0, 0);
+      
+      const sessionEndDate = new Date(sessionDate);
+      sessionEndDate.setHours(bookingHour + booking.duration);
+
+      const isActive = isSessionActive(booking);
+      
+      if (isActive) {
+        acc.active.push(booking);
+      } else if (sessionEndDate < now) {
+        acc.past.push(booking);
+      } else {
+        acc.upcoming.push(booking);
+      }
+      
+      return acc;
+    }, { active: [], upcoming: [], past: [] });
+  };
+
+
+  const checkNetwork = async () => {
+    try {
+      if (window.ethereum) {
+        const currentChainId = await window.ethereum.request({
+          method: 'eth_chainId',
+        });
+        
+        if (currentChainId !== POLYGON_CHAIN_ID) {
+          try {
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: POLYGON_CHAIN_ID }],
+            });
+            return true;
+          } catch (switchError) {
+            if (switchError.code === 4902) {
+              try {
+                await window.ethereum.request({
+                  method: 'wallet_addEthereumChain',
+                  params: [{
+                    chainId: POLYGON_CHAIN_ID,
+                    chainName: 'Polygon Mainnet',
+                    nativeCurrency: {
+                      name: 'MATIC',
+                      symbol: 'MATIC',
+                      decimals: 18
+                    },
+                    rpcUrls: ['https://polygon-rpc.com/'],
+                    blockExplorerUrls: ['https://polygonscan.com/']
+                  }],
+                });
+                return true;
+              } catch (addError) {
+                console.error('Error adding Polygon network:', addError);
+                setError('Failed to add Polygon network to your wallet');
+                return false;
+              }
+            }
+            console.error('Failed to switch to Polygon network:', switchError);
+            setError('Failed to switch to Polygon network');
+            return false;
+          }
+        }
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking network:', error);
+      return false;
+    }
+  };
+
+  const updateWalletStatus = async () => {
+    try {
+      if (window.ethereum) {
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        const isConnected = accounts.length > 0;
+        setWalletConnected(isConnected);
+        
+        if (isConnected) {
+          setCurrentAccount(accounts[0]);
+          const provider = new BrowserProvider(window.ethereum);
+          const balance = await provider.getBalance(accounts[0]);
+          setMaticBalance(ethers.formatEther(balance));
+        }
+      }
+    } catch (error) {
+      console.error('Error updating wallet status:', error);
+    }
+  };
+
+  const connectWallet = async () => {
+    try {
+      if (!window.ethereum) {
+        setError('Please install MetaMask or another Web3 wallet');
+        return;
+      }
+
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts'
+      });
+
+      const isCorrectNetwork = await checkNetwork();
+      if (!isCorrectNetwork) {
+        return;
+      }
+
+      setCurrentAccount(accounts[0]);
+      setWalletConnected(true);
+
+      const provider = new BrowserProvider(window.ethereum);
+      const balance = await provider.getBalance(accounts[0]);
+      setMaticBalance(ethers.formatEther(balance));
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      setError('Failed to connect wallet. Please try again.');
+    }
+  };
+
+  const handleAccountsChanged = (accounts) => {
+    if (accounts.length === 0) {
+      setWalletConnected(false);
+      setCurrentAccount(null);
+      setMaticBalance(null);
+    } else {
+      setCurrentAccount(accounts[0]);
+      updateWalletStatus();
+    }
+  };
+
+  const handleChainChanged = () => {
+    window.location.reload();
+  };
+
+  const processPayment = async (booking) => {
+    try {
+      if (!walletConnected) {
+        await connectWallet();
+        return;
+      }
+
+      setProcessingPayment(true);
+      setError(null);
+
+      const isCorrectNetwork = await checkNetwork();
+      if (!isCorrectNetwork) {
+        setProcessingPayment(false);
+        return;
+      }
+
+      const provider = new BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+
+      const maticAmount = (booking.totalCost / MATIC_TO_USD).toFixed(6);
+      const maticWei = ethers.parseEther(maticAmount);
+
+      const balance = await provider.getBalance(currentAccount);
+      if (balance < maticWei) {
+        setError('Insufficient MATIC balance');
+        setProcessingPayment(false);
+        return;
+      }
+
+      const tx = await signer.sendTransaction({
+        to: booking.developerWallet,
+        value: maticWei,
+      });
+
+      const receipt = await tx.wait();
+
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        paymentStatus: 'completed',
+        transactionHash: receipt.hash,
+        paymentTimestamp: new Date().toISOString()
+      });
+
+      await fetchBookings();
+
+      setError(null);
+
+    } catch (error) {
+      console.error('Payment error:', error);
+      setError(error.message || 'Payment failed. Please try again.');
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
 
   const checkWalletConnection = async () => {
     if (typeof window.ethereum !== 'undefined') {
@@ -148,20 +366,19 @@ const fetchBookings = async () => {
   }
 };
 
-  const connectWallet = async () => {
-    if (typeof window.ethereum !== 'undefined') {
-      try {
-        await window.ethereum.request({ method: 'eth_requestAccounts' });
-        setWalletConnected(true);
-        const provider = new BrowserProvider(window.ethereum);
-        const accounts = await provider.listAccounts();
-        const balance = await provider.getBalance(accounts[0]);
-        setMaticBalance(ethers.formatEther(balance));
-      } catch (err) {
-        console.error('Error connecting wallet:', err);
-      }
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
     }
-  };
+
+    return () => {
+      if (window.ethereum) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+      }
+    };
+  }, []);
 
   const isSessionActive = (booking) => {
     const now = new Date();
@@ -172,7 +389,6 @@ const fetchBookings = async () => {
     const sessionEndDate = new Date(sessionDate);
     sessionEndDate.setHours(bookingHour + booking.duration);
 
-    // Allow joining 10 minutes before and staying 10 minutes after
     const joinWindowStart = new Date(sessionDate);
     joinWindowStart.setMinutes(joinWindowStart.getMinutes() - 10);
     
@@ -180,43 +396,6 @@ const fetchBookings = async () => {
     joinWindowEnd.setMinutes(joinWindowEnd.getMinutes() + 10);
 
     return now >= joinWindowStart && now <= joinWindowEnd;
-  };
-
-  const processPayment = async (booking) => {
-    try {
-      setProcessingPayment(true);
-
-      if (!window.ethereum) {
-        throw new Error('MetaMask not installed');
-      }
-
-      const provider = new BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      
-      const maticAmount = (booking.totalCost / MATIC_TO_USD).toFixed(6);
-      
-      const tx = await signer.sendTransaction({
-        to: booking.developerWallet,
-        value: ethers.parseEther(maticAmount),
-      });
-
-      await tx.wait();
-
-      // Update booking status in Firestore
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        paymentStatus: 'completed',
-        transactionHash: tx.hash
-      });
-
-      // Refresh bookings
-      await fetchBookings();
-
-    } catch (error) {
-      console.error('Payment error:', error);
-      setError(error.message || 'Payment failed');
-    } finally {
-      setProcessingPayment(false);
-    }
   };
 
   const formatDate = (dateString) => {
@@ -269,6 +448,50 @@ const fetchBookings = async () => {
     return `${minutes} minutes`;
   };
 
+  
+  const renderChatButton = (booking) => {
+    const chatAvailable = isChatAvailable(booking.date, booking.timeSlot);
+    
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="inline-block">
+              <Button
+                variant="outline"
+                size="icon"
+                disabled={!chatAvailable || booking.paymentStatus !== 'completed'}
+                onClick={() => {
+                  setActiveChatBooking(booking);
+                  setShowChat(true);
+                }}
+                className={`relative ${
+                  chatAvailable && booking.paymentStatus === 'completed'
+                    ? 'hover:bg-blue-50 dark:hover:bg-blue-900/20'
+                    : ''
+                }`}
+              >
+                <MessageSquare className={`w-5 h-5 ${
+                  chatAvailable && booking.paymentStatus === 'completed'
+                    ? 'text-blue-500'
+                    : 'text-gray-400'
+                }`} />
+              </Button>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            {!chatAvailable 
+              ? 'Chat available 30 minutes before and after session'
+              : booking.paymentStatus !== 'completed'
+                ? 'Complete payment to enable chat'
+                : 'Open chat'}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  };
+  
+
   const renderBookingCard = (booking) => {
     const isActive = isSessionActive(booking);
     const isPending = booking.paymentStatus === 'pending';
@@ -276,6 +499,7 @@ const fetchBookings = async () => {
 
     return (
       <motion.div
+        key={booking.id}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
@@ -304,6 +528,7 @@ const fetchBookings = async () => {
                 </CardTitle>
               </div>
               <div className="flex items-center gap-2">
+                {renderChatButton(booking)}
                 {getStatusBadge(booking)}
               </div>
             </div>
@@ -433,6 +658,8 @@ const fetchBookings = async () => {
 
           {isActive && booking.paymentStatus === 'completed' && (
             <CardFooter className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 p-6">
+            <div className="flex gap-4 w-full">
+              {renderChatButton(booking)}
               <Button 
                 onClick={() => {
                   setActiveSession(booking);
@@ -444,12 +671,14 @@ const fetchBookings = async () => {
                 Join Video Session Now
                 <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
+            </div>
             </CardFooter>
           )}
         </Card>
       </motion.div>
     );
   };
+
 
   if (loading) {
     return (
@@ -488,98 +717,123 @@ const fetchBookings = async () => {
             )}
           </div>
 
-          <Tabs defaultValue="upcoming" className="space-y-6">
-            <TabsList className="bg-white dark:bg-gray-800 p-1 rounded-lg">
-              <TabsTrigger 
-                value="upcoming" 
-                className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white"
-              >
-                <Calendar className="w-4 h-4" />
-                Upcoming Sessions
-              </TabsTrigger>
-              <TabsTrigger 
-                value="past"
-                className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white"
-              >
-                <History className="w-4 h-4" />
-                Past Sessions
-              </TabsTrigger>
-            </TabsList>
+          <Tabs defaultValue="active" className="space-y-6">
+        <TabsList className="bg-white dark:bg-gray-800 p-1 rounded-lg">
+          <TabsTrigger 
+            value="active" 
+            className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white"
+          >
+            <Video className="w-4 h-4" />
+            Currently Active
+          </TabsTrigger>
+          <TabsTrigger 
+            value="upcoming" 
+            className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white"
+          >
+            <Calendar className="w-4 h-4" />
+            Upcoming Sessions
+          </TabsTrigger>
+          <TabsTrigger 
+            value="past"
+            className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-500 data-[state=active]:to-slate-500 data-[state=active]:text-white"
+          >
+            <History className="w-4 h-4" />
+            Past Sessions
+          </TabsTrigger>
+        </TabsList>
 
-            <TabsContent value="upcoming">
-              <AnimatePresence>
-                {upcomingBookings.length === 0 ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.3 }}
-                    className="text-center p-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg"
-                  >
-                    <div className="max-w-md mx-auto space-y-6">
-                      <div className="w-24 h-24 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto">
-                        <Calendar className="w-12 h-12 text-blue-500" />
-                      </div>
-                      <h3 className="text-2xl font-semibold text-gray-900 dark:text-white">
-                        No Upcoming Sessions
-                      </h3>
-                      <p className="text-gray-500 dark:text-gray-400">
-                        You don't have any upcoming mentoring sessions scheduled. Book a session with a developer to get started!
-                      </p>
-                      <Button 
-                        onClick={() => router.push('/developers')}
-                        className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
-                      >
-                        Find a Developer
-                        <ArrowRight className="w-5 h-5 ml-2" />
-                      </Button>
-                    </div>
-                  </motion.div>
-                ) : (
-                  <div className="space-y-6">
-                    {upcomingBookings.map(booking => renderBookingCard(booking))}
-                  </div>
-                )}
-              </AnimatePresence>
-            </TabsContent>
+        {(() => {
+          const { active, upcoming, past } = categorizeBookings(bookings);
+          
+          const renderEmptyState = (type, icon, title, description) => (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+              className="text-center p-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg"
+            >
+              <div className="max-w-md mx-auto space-y-6">
+                <div className="w-24 h-24 bg-gray-100 dark:bg-gray-900/30 rounded-full flex items-center justify-center mx-auto">
+                  {icon}
+                </div>
+                <h3 className="text-2xl font-semibold text-gray-900 dark:text-white">
+                  {title}
+                </h3>
+                <p className="text-gray-500 dark:text-gray-400">
+                  {description}
+                </p>
+                <Button 
+                  onClick={() => router.push('/developers')}
+                  className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                >
+                  Find a Developer
+                  <ArrowRight className="w-5 h-5 ml-2" />
+                </Button>
+              </div>
+            </motion.div>
+          );
 
-            <TabsContent value="past">
-              <AnimatePresence>
-                {pastBookings.length === 0 ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.3 }}
-                    className="text-center p-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg"
-                  >
-                    <div className="max-w-md mx-auto space-y-6">
-                      <div className="w-24 h-24 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center mx-auto">
-                        <History className="w-12 h-12 text-purple-500" />
-                      </div>
-                      <h3 className="text-2xl font-semibold text-gray-900 dark:text-white">
-                        No Past Sessions
-                      </h3>
-                      <p className="text-gray-500 dark:text-gray-400">
-                        You haven't completed any mentoring sessions yet. Book your first session to start learning!
-                      </p>
-                      <Button 
-                        onClick={() => router.push('/developers')}
-                        className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
-                      >
-                        Explore Developers
-                        <ArrowRight className="w-5 h-5 ml-2" />
-                      </Button>
+          return (
+            <>
+              <TabsContent value="active">
+                <AnimatePresence>
+                  {active.length === 0 ? (
+                    renderEmptyState(
+                      'active',
+                      <Video className="w-12 h-12 text-green-500" />,
+                      'No Active Sessions',
+                      "You don't have any sessions in progress right now."
+                    )
+                  ) : (
+                    <div className="space-y-6">
+                      {active.map(booking => renderBookingCard(booking))}
                     </div>
-                  </motion.div>
-                ) : (
-                  <div className="space-y-6">
-                    {pastBookings.map(booking => renderBookingCard(booking))}
-                  </div>
-                )}
-              </AnimatePresence>
-            </TabsContent>
-          </Tabs>
+                  )}
+                </AnimatePresence>
+              </TabsContent>
+
+              <TabsContent value="upcoming">
+                <AnimatePresence>
+                  {upcoming.length === 0 ? (
+                    renderEmptyState(
+                      'upcoming',
+                      <Calendar className="w-12 h-12 text-blue-500" />,
+                      'No Upcoming Sessions',
+                      "You don't have any upcoming mentoring sessions scheduled."
+                    )
+                  ) : (
+                    <div className="space-y-6">
+                      {upcoming
+                        .sort((a, b) => new Date(a.date) - new Date(b.date))
+                        .map(booking => renderBookingCard(booking))}
+                    </div>
+                  )}
+                </AnimatePresence>
+              </TabsContent>
+
+              <TabsContent value="past">
+                <AnimatePresence>
+                  {past.length === 0 ? (
+                    renderEmptyState(
+                      'past',
+                      <History className="w-12 h-12 text-gray-500" />,
+                      'No Past Sessions',
+                      "You haven't completed any mentoring sessions yet."
+                    )
+                  ) : (
+                    <div className="space-y-6">
+                      {past
+                        .sort((a, b) => new Date(b.date) - new Date(a.date))
+                        .map(booking => renderBookingCard(booking))}
+                    </div>
+                  )}
+                </AnimatePresence>
+              </TabsContent>
+            </>
+          );
+        })()}
+      </Tabs>
 
           {error && (
             <Alert variant="destructive" className="mt-6">
@@ -610,7 +864,26 @@ const fetchBookings = async () => {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+      <Dialog open={showChat} onOpenChange={setShowChat}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Chat with {activeChatBooking?.developerName}</DialogTitle>
+            <DialogDescription>
+              Session scheduled for {activeChatBooking && formatDate(activeChatBooking.date)}
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeChatBooking && (
+            <ChatComponent
+              bookingId={activeChatBooking.id}
+              developerId={activeChatBooking.developerId}
+              developerName={activeChatBooking.developerName}
+              developerImage={developerServices[activeChatBooking.developerId]?.imageUrl}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+      </div>
   );
 };
 
