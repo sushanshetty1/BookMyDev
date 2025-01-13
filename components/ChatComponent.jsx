@@ -1,3 +1,5 @@
+//ChatComponent.jsx
+"use client"
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, query, orderBy, onSnapshot, addDoc, where, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -6,68 +8,181 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const ChatComponent = ({ bookingId, developerId, developerName, developerImage }) => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const scrollAreaRef = useRef(null);
+  const messagesRef = useRef([]);
   const currentUser = auth.currentUser;
+  const DEBUG = true;
 
   useEffect(() => {
-    if (!bookingId) return;
-
-    const q = query(
-      collection(db, 'chats'),
-      where('bookingId', '==', bookingId),
-      orderBy('timestamp', 'asc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newMessages = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setMessages(newMessages);
-      setLoading(false);
-      
-      setTimeout(() => {
-        if (scrollAreaRef.current) {
-          scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-        }
-      }, 100);
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setIsAuthenticated(!!user);
+      if (!user) {
+        setError('Please sign in to access the chat');
+      }
     });
 
     return () => unsubscribe();
-  }, [bookingId]);
+  }, []);
+
+  useEffect(() => {
+    if (DEBUG) {
+      console.log('Chat Component Props:', {
+        bookingId,
+        developerId,
+        developerName,
+        developerImage,
+        currentUser: auth.currentUser?.uid
+      });
+    }
+  }, [bookingId, developerId, developerName, developerImage]);
+
+  useEffect(() => {
+    if (!bookingId || !isAuthenticated) {
+      if (DEBUG) console.log('Missing required data:', { bookingId, isAuthenticated });
+      return;
+    }
+
+    let unsubscribe;
+    
+    try {
+      if (DEBUG) console.log('Setting up chat listener for bookingId:', bookingId);
+
+      const q = query(
+        collection(db, 'chats'),
+        where('bookingId', '==', bookingId),
+        orderBy('timestamp', 'asc')
+      );
+
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          if (DEBUG) console.log('Chat snapshot received:', snapshot.size, 'messages');
+          
+          const newMessages = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          
+          if (DEBUG) console.log('Processed messages:', newMessages);
+          
+          setMessages(newMessages);
+          messagesRef.current = newMessages;
+          setLoading(false);
+          setError(null);
+          
+          // Scroll to bottom after messages update
+          setTimeout(() => {
+            if (scrollAreaRef.current) {
+              scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+            }
+          }, 100);
+        },
+        (err) => {
+          console.error('Error in chat snapshot:', err);
+          if (err.code === 'permission-denied') {
+            setError(`Access denied. Please check your permissions. Error: ${err.message}`);
+          } else {
+            setError(`Failed to load messages: ${err.message}`);
+          }
+          setLoading(false);
+        }
+      );
+    } catch (err) {
+      console.error('Error setting up chat listener:', err);
+      setError(`Chat initialization failed: ${err.message}`);
+      setLoading(false);
+    }
+
+    return () => {
+      if (DEBUG) console.log('Cleaning up chat listener');
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [bookingId, isAuthenticated]);
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || !isAuthenticated) return;
+
+    const messageText = newMessage.trim();
+    setNewMessage('');
 
     try {
-      await addDoc(collection(db, 'chats'), {
+      if (!currentUser) {
+        throw new Error('Authentication required');
+      }
+
+      if (!bookingId || !developerId) {
+        throw new Error('Missing booking or developer information');
+      }
+
+      if (DEBUG) {
+        console.log('Sending message:', {
+          bookingId,
+          messageText,
+          senderId: currentUser.uid,
+          developerId
+        });
+      }
+
+      const messageData = {
         bookingId,
-        message: newMessage.trim(),
+        message: messageText,
         senderId: currentUser.uid,
         senderName: currentUser.displayName || 'User',
         senderImage: currentUser.photoURL,
         recipientId: developerId,
-        timestamp: serverTimestamp()
-      });
+        timestamp: serverTimestamp(),
+        type: 'message'
+      };
 
-      setNewMessage('');
+      await addDoc(collection(db, 'chats'), messageData);
+
+      if (DEBUG) console.log('Message sent successfully');
+
     } catch (error) {
       console.error('Error sending message:', error);
+      setError(`Failed to send message: ${error.message}`);
+      setNewMessage(messageText);
     }
   };
 
   const formatMessageTime = (timestamp) => {
     if (!timestamp) return '';
-    const date = timestamp.toDate();
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const date = timestamp.toDate();
+      return date.toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit'
+      });
+    } catch (err) {
+      console.error('Error formatting timestamp:', err);
+      return '';
+    }
   };
+
+  if (!isAuthenticated) {
+    return (
+      <Card className="w-full p-4">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Please sign in to access the chat
+          </AlertDescription>
+        </Alert>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full h-[600px] flex flex-col">
@@ -75,7 +190,7 @@ const ChatComponent = ({ bookingId, developerId, developerName, developerImage }
         <div className="flex items-center space-x-4">
           <Avatar>
             <AvatarImage src={developerImage} alt={developerName} />
-            <AvatarFallback>{developerName[0]}</AvatarFallback>
+            <AvatarFallback>{developerName?.[0] || 'D'}</AvatarFallback>
           </Avatar>
           <CardTitle>{developerName}</CardTitle>
         </div>
@@ -90,6 +205,11 @@ const ChatComponent = ({ bookingId, developerId, developerName, developerImage }
             <div className="flex items-center justify-center h-full">
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
             </div>
+          ) : error ? (
+            <Alert variant="destructive" className="mx-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           ) : messages.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
               No messages yet. Start the conversation!
@@ -97,7 +217,7 @@ const ChatComponent = ({ bookingId, developerId, developerName, developerImage }
           ) : (
             <div className="space-y-4">
               {messages.map((msg) => {
-                const isCurrentUser = msg.senderId === currentUser.uid;
+                const isCurrentUser = msg.senderId === currentUser?.uid;
                 return (
                   <div
                     key={msg.id}
@@ -106,7 +226,7 @@ const ChatComponent = ({ bookingId, developerId, developerName, developerImage }
                     <div className={`flex items-start space-x-2 max-w-[80%] ${isCurrentUser ? 'flex-row-reverse space-x-reverse' : ''}`}>
                       <Avatar className="w-8 h-8">
                         <AvatarImage src={msg.senderImage} />
-                        <AvatarFallback>{msg.senderName[0]}</AvatarFallback>
+                        <AvatarFallback>{msg.senderName?.[0] || '?'}</AvatarFallback>
                       </Avatar>
                       <div>
                         <div
@@ -116,7 +236,7 @@ const ChatComponent = ({ bookingId, developerId, developerName, developerImage }
                               : 'bg-gray-100 dark:bg-gray-800'
                           }`}
                         >
-                          <p className="text-sm">{msg.message}</p>
+                          <p className="text-sm break-words">{msg.message}</p>
                         </div>
                         <p className="text-xs text-gray-500 mt-1">
                           {formatMessageTime(msg.timestamp)}
@@ -139,8 +259,12 @@ const ChatComponent = ({ bookingId, developerId, developerName, developerImage }
               onChange={(e) => setNewMessage(e.target.value)}
               placeholder="Type your message..."
               className="flex-1"
+              disabled={!!error}
             />
-            <Button type="submit" disabled={!newMessage.trim()}>
+            <Button 
+              type="submit" 
+              disabled={!newMessage.trim() || !!error}
+            >
               <Send className="w-4 h-4" />
             </Button>
           </div>

@@ -1,6 +1,6 @@
 "use client"
 import React, { useState, useEffect, useCallback } from 'react';
-import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, updateDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { useRouter } from 'next/navigation';
 import { BrowserProvider, ethers } from 'ethers';
@@ -79,10 +79,65 @@ const YourBookings = () => {
   const upcomingBookings = bookings.filter(booking => new Date(booking.date) >= new Date());
   const pastBookings = bookings.filter(booking => new Date(booking.date) < new Date());
   const [developerServices, setDeveloperServices] = useState({});
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     fetchBookings();
     checkWalletConnection();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setIsAuthenticated(!!user);
+      setAuthChecked(true);
+      if (user) {
+        setupFirestoreListeners(user.uid);
+      } else {
+        router.push('/SignIn');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  const setupFirestoreListeners = useCallback((userId) => {
+    try {
+      const bookingsRef = collection(db, 'bookings');
+      const q = query(bookingsRef, where('userId', '==', userId));
+      
+      const unsubscribe = onSnapshot(q, 
+        (snapshot) => {
+          const bookingsData = [];
+          const developerIds = new Set();
+
+          snapshot.forEach((doc) => {
+            bookingsData.push({ id: doc.id, ...doc.data() });
+            developerIds.add(doc.data().developerId);
+          });
+
+          bookingsData.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setBookings(bookingsData);
+
+          if (developerIds.size > 0) {
+            fetchDeveloperServices(Array.from(developerIds));
+          }
+          
+          setLoading(false);
+        },
+        (error) => {
+          console.error('Firestore listener error:', error);
+          setError('Failed to load bookings. Please check your connection and try again.');
+          setLoading(false);
+        }
+      );
+
+      return unsubscribe;
+    } catch (err) {
+      console.error('Error setting up Firestore listeners:', err);
+      setError('Failed to initialize bookings. Please refresh the page.');
+      setLoading(false);
+    }
   }, []);
 
   const isChatAvailable = (bookingDate, timeSlot) => {
@@ -315,10 +370,53 @@ const YourBookings = () => {
     }
   };
 
+  const fetchBookings = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setError('Please sign in to view your bookings');
+        router.push('/SignIn');
+        return;
+      }
+
+      setLoading(true);
+      const bookingsRef = collection(db, 'bookings');
+      const q = query(bookingsRef, where('userId', '==', user.uid));
+      
+      const querySnapshot = await getDocs(q);
+      
+      const bookingsData = [];
+      const developerIds = new Set();
+
+      querySnapshot.forEach((doc) => {
+        bookingsData.push({ id: doc.id, ...doc.data() });
+        developerIds.add(doc.data().developerId);
+      });
+
+      bookingsData.sort((a, b) => new Date(b.date) - new Date(a.date));
+      setBookings(bookingsData);
+
+      if (developerIds.size > 0) {
+        await fetchDeveloperServices(Array.from(developerIds));
+      }
+    } catch (err) {
+      console.error('Error fetching bookings:', err);
+      if (err.code === 'permission-denied') {
+        setError('Access denied. Please check your account permissions.');
+      } else {
+        setError('Failed to load bookings. Please try again later.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update fetchDeveloperServices with better error handling
   const fetchDeveloperServices = async (developerIds) => {
     try {
       const servicesRef = collection(db, 'services');
       const q = query(servicesRef, where('userId', 'in', developerIds));
+      
       const querySnapshot = await getDocs(q);
       
       const services = {};
@@ -329,42 +427,13 @@ const YourBookings = () => {
       setDeveloperServices(services);
     } catch (err) {
       console.error('Error fetching developer services:', err);
+      if (err.code === 'permission-denied') {
+        setError('Unable to load developer information. Please check your permissions.');
+      } else {
+        setError('Failed to load developer information. Please try again later.');
+      }
     }
   };
-
-const fetchBookings = async () => {
-  try {
-    const user = auth.currentUser;
-    if (!user) {
-      router.push('/SignIn');
-      return;
-    }
-
-    const bookingsRef = collection(db, 'bookings');
-    const q = query(bookingsRef, where('userId', '==', user.uid));
-    const querySnapshot = await getDocs(q);
-
-    const bookingsData = [];
-    const developerIds = new Set();
-
-    querySnapshot.forEach((doc) => {
-      bookingsData.push({ id: doc.id, ...doc.data() });
-      developerIds.add(doc.data().developerId);
-    });
-
-    bookingsData.sort((a, b) => new Date(b.date) - new Date(a.date));
-    setBookings(bookingsData);
-
-    if (developerIds.size > 0) {
-      await fetchDeveloperServices(Array.from(developerIds));
-    }
-  } catch (err) {
-    setError('Failed to fetch bookings');
-    console.error('Error fetching bookings:', err);
-  } finally {
-    setLoading(false);
-  }
-};
 
   useEffect(() => {
     if (window.ethereum) {
@@ -679,6 +748,20 @@ const fetchBookings = async () => {
     );
   };
 
+  if (!authChecked) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="space-y-4 text-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <div className="text-gray-500 dark:text-gray-400">Checking authentication...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
 
   if (loading) {
     return (
