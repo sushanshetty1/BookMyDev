@@ -65,7 +65,6 @@ import {
 import ChatComponent from '@/components/ChatComponent';
 import Link from 'next/link';
 
-// Toast Component with improved styling
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 3000);
@@ -91,26 +90,10 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
-const ChatToggleButton = ({ onClick, isOpen }) => (
-  <Button
-    onClick={onClick}
-    className={`fixed bottom-6 right-6 z-40 rounded-full w-14 h-14 
-                shadow-lg transition-all duration-300 
-                ${isOpen ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'}`}
-  >
-    {isOpen ? (
-      <X className="w-6 h-6" />
-    ) : (
-      <MessageSquare className="w-6 h-6" />
-    )}
-  </Button>
-);
-
 const DeveloperDashboard = () => {
   const [activeChatBooking, setActiveChatBooking] = useState(null);
   const [isChatDialogOpen, setIsChatDialogOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [services, setServices] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [toast, setToast] = useState(null);
   const [stats, setStats] = useState({
@@ -126,6 +109,68 @@ const DeveloperDashboard = () => {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [error, setError] = useState(null);
   
+  useEffect(() => {
+    let unsubscribeBookings = null;
+
+    const setupSubscriptions = async () => {
+      setLoading(true);
+      
+      try {
+        await new Promise((resolve) => {
+          const unsubAuth = auth.onAuthStateChanged((user) => {
+            if (user !== null) {
+              unsubAuth();
+              resolve();
+            }
+          });
+        });
+
+        const user = auth.currentUser;
+        if (!user) {
+          setError('Please sign in to view your dashboard');
+          setLoading(false);
+          return;
+        }
+
+        const bookingsQuery = query(
+          collection(db, 'bookings'),
+          where('developerId', '==', user.uid),
+          orderBy('date', 'desc')
+        );
+
+        unsubscribeBookings = onSnapshot(bookingsQuery,
+          (snapshot) => {
+            const bookingsData = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data(),
+              date: convertTimestamp(doc.data().date)
+            })).filter(Boolean);
+            
+            setBookings(bookingsData);
+            calculateStats(bookingsData);
+          },
+          (error) => {
+            console.error('Bookings listener error:', error);
+            if (error.code === 'permission-denied') {
+              setError('Access denied. Please check your permissions.');
+            }
+          }
+        );
+
+      } catch (error) {
+        console.error('Setup error:', error);
+        setError('Failed to initialize dashboard');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    setupSubscriptions();
+
+    return () => {
+      if (unsubscribeBookings) unsubscribeBookings();
+    };
+  }, []);
 
   useEffect(() => {
     const checkScreenSize = () => {
@@ -205,139 +250,6 @@ const DeveloperDashboard = () => {
       return false;
     }
   };
-
-  const handleOpenChat = (booking) => {
-    setSelectedBooking(booking);
-    setIsChatOpen(true);
-  };
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const user = auth.currentUser;
-        if (!user) {
-          setError('Please sign in to view your dashboard');
-          setLoading(false);
-          return;
-        }
-
-        try {
-          const testQuery = query(
-            collection(db, 'services'),
-            where('developerId', '==', user.uid),
-            limit(1)
-          );
-          await getDocs(testQuery);
-        } catch (error) {
-          if (error.code === 'permission-denied') {
-            setError('You do not have permission to access this dashboard. Please contact support.');
-            setLoading(false);
-            return;
-          }
-        }
-
-        const servicesQuery = query(
-          collection(db, 'services'),
-          where('developerId', '==', user.uid)
-        );
-
-        const unsubscribeServices = onSnapshot(servicesQuery, (snapshot) => {
-          const servicesData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          setServices(servicesData);
-        }, (error) => {
-          console.error('Error fetching services:', error);
-          if (error.code === 'permission-denied') {
-            setError('Access denied. Please check your permissions.');
-          } else {
-            setError('Failed to load services. Please try again later.');
-          }
-        });
-
-        const bookingsQuery = query(
-          collection(db, 'bookings'),
-          where('developerId', '==', user.uid),
-          orderBy('date', 'asc')
-        );
-
-        const unsubscribeBookings = onSnapshot(bookingsQuery, (snapshot) => {
-          const now = new Date();
-          const bookingsData = snapshot.docs.map(doc => {
-            try {
-              const data = doc.data();
-              const bookingDate = convertTimestamp(data.date);
-              
-              if (!bookingDate) {
-                console.warn(`Invalid date for booking ${doc.id}`);
-                return null;
-              }
-
-              const bookingEnd = new Date(bookingDate);
-              
-              if (data.timeSlot?.end) {
-                const [endHour, endMinute] = data.timeSlot.end.split(':');
-                bookingEnd.setHours(parseInt(endHour, 10), parseInt(endMinute, 10), 0, 0);
-              }
-              
-              const isExpired = bookingEnd < now;
-
-              if (isExpired && data.status === 'pending') {
-                updateDoc(doc.ref, { 
-                  status: 'completed',
-                  updatedAt: Timestamp.now()
-                }).catch(error => {
-                  console.error('Error updating expired booking:', error);
-                });
-                data.status = 'completed';
-              }
-              
-              return {
-                id: doc.id,
-                ...data,
-                date: bookingDate,
-                isExpired
-              };
-            } catch (error) {
-              console.error(`Error processing booking ${doc.id}:`, error);
-              return null;
-            }
-          }).filter(Boolean);
-          
-          const sortedBookings = bookingsData.sort((a, b) => {
-            if (a.isExpired === b.isExpired) {
-              return new Date(a.date) - new Date(b.date);
-            }
-            return a.isExpired ? 1 : -1;
-          });
-
-          setBookings(sortedBookings);
-          calculateStats(sortedBookings);
-        }, (error) => {
-          console.error('Error fetching bookings:', error);
-          if (error.code === 'permission-denied') {
-            setError('Access denied. Please check your permissions.');
-          } else {
-            setError('Failed to load bookings. Please try again later.');
-          }
-        });
-
-        setLoading(false);
-        
-        return () => {
-          unsubscribeServices();
-          unsubscribeBookings();
-        };
-      } catch (error) {
-        console.error('Error in fetchData:', error);
-        setError('An unexpected error occurred. Please try again later.');
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
 
   const handleJoinMeeting = (roomId) => {
     setCurrentRoomId(roomId);
@@ -437,7 +349,7 @@ const DeveloperDashboard = () => {
   }
 
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-black p-4 sm:p-6 mt-12">
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-black p-4 sm:p-6 mt-16">
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
         
         <div className="max-w-7xl mx-auto">
@@ -545,7 +457,7 @@ const DeveloperDashboard = () => {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[200px]">Client</TableHead>
-                      <TableHead>Service</TableHead>
+                      <TableHead></TableHead>
                       <TableHead>Date & Time</TableHead>
                       <TableHead>Duration</TableHead>
                       <TableHead>Status</TableHead>
@@ -654,38 +566,29 @@ const DeveloperDashboard = () => {
           </CardContent>
         </Card>
       </div>
-
-          {/* Chat Dialog */}
-          <Dialog 
+      
+      <Dialog 
         open={isChatDialogOpen} 
         onOpenChange={setIsChatDialogOpen}
+        modal={true}
       >
-        <DialogContent className={`${isMobile ? 'w-full h-full max-w-none m-0 rounded-none' : 'sm:max-w-[400px]'}`}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-400 to-purple-400 flex items-center justify-center text-white">
-                {activeChatBooking?.userName?.charAt(0) || 'U'}
-              </div>
-              <div>
-                <div>{activeChatBooking?.userName}</div>
-                <div className="text-sm text-gray-500 font-normal">
-                  {activeChatBooking?.serviceTitle}
-                </div>
-              </div>
-            </DialogTitle>
+        <DialogContent className="max-w-[90vw] w-[500px] h-[80vh] p-0 overflow-hidden">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Chat</DialogTitle>
           </DialogHeader>
-          <div className={`${isMobile ? 'h-[calc(100vh-8rem)]' : 'h-[500px]'}`}>
-            {activeChatBooking && (
+          {activeChatBooking && (
+            <div className="h-full">
               <ChatComponent
                 bookingId={activeChatBooking.id}
                 developerId={auth.currentUser?.uid}
                 developerName={auth.currentUser?.displayName}
                 developerImage={auth.currentUser?.photoURL}
               />
-            )}
-          </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
+
 
       {/* Video Dialog */}
       <Dialog open={isVideoDialogOpen} onOpenChange={setIsVideoDialogOpen}>
