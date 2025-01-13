@@ -190,56 +190,7 @@ const getAvailabilityString = (availability) => {
 
   const FilterSection = () => (
     <div className="space-y-8">
-      {/* Skills Filter */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Skills</h3>
-          {selectedSkills.length > 0 && (
-            <button
-              onClick={() => setSelectedSkills([])}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-        <Popover>
-          <PopoverTrigger asChild>
-            <button className="w-full px-4 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg text-left text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600">
-              {selectedSkills.length === 0 ? (
-                "Select skills..."
-              ) : (
-                `${selectedSkills.length} selected`
-              )}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="w-64 p-0" align="start">
-            <Command>
-              <CommandInput placeholder="Search skills..." />
-              <CommandEmpty>No skills found.</CommandEmpty>
-              <CommandGroup className="max-h-64 overflow-auto">
-                {allSkills.map(skill => (
-                  <CommandItem
-                    key={skill}
-                    onSelect={() => toggleSkill(skill)}
-                    className="flex items-center gap-2"
-                  >
-                    <div className={`w-4 h-4 rounded border flex items-center justify-center ${
-                      selectedSkills.includes(skill)
-                        ? 'bg-blue-600 border-blue-600'
-                        : 'border-gray-300 dark:border-gray-600'
-                    }`}>
-                      {selectedSkills.includes(skill) && (
-                        <Check className="w-3 h-3 text-white" />
-                      )}
-                    </div>
-                    {skill}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </Command>
-          </PopoverContent>
-        </Popover>
         {selectedSkills.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {selectedSkills.map(skill => (
@@ -317,7 +268,7 @@ const getAvailabilityString = (availability) => {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-black">
+    <div className="min-h-screen bg-gray-50 dark:bg-black mt-16">
       {/* Header */}
       <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">

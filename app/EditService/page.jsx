@@ -724,7 +724,7 @@ const EditService = () => {
               {/* Action Buttons */}
               <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
                 <div className="flex flex-col sm:flex-row gap-4 justify-end">
-                  <Link href="/services">
+                  <Link href="/Developers">
                     <button
                       type="button"
                       className="px-6 py-3 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl transition-colors"
@@ -782,7 +782,7 @@ const EditService = () => {
                   <button
                     onClick={() => {
                       setState(prev => ({ ...prev, success: false }));
-                      router.push('/services');
+                      router.push('/Developers');
                     }}
                     className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl transition-all transform hover:scale-105"
                   >

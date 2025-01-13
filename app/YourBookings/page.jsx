@@ -94,7 +94,7 @@ const YourBookings = () => {
       if (user) {
         setupFirestoreListeners(user.uid);
       } else {
-        router.push('/SignIn');
+        router.push('/YourBookings');
       }
     });
 
@@ -374,8 +374,7 @@ const YourBookings = () => {
     try {
       const user = auth.currentUser;
       if (!user) {
-        setError('Please sign in to view your bookings');
-        router.push('/SignIn');
+        router.push('/YourBookings');
         return;
       }
 

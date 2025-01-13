@@ -119,18 +119,20 @@ const Hero = () => {
 
   return (
     <section className="bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-black min-h-screen mt-6">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="pt-20 pb-16">
-          <div className="text-center max-w-3xl mx-auto mb-16">
-            <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 mb-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="pt-16 lg:pt-20 pb-16">
+          {/* Hero Header Section */}
+          <div className="text-center max-w-3xl mx-auto mb-12 lg:mb-16">
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 mb-4 lg:mb-6">
               Find & Book Top Developers Instantly
             </h1>
-            <p className="text-xl text-gray-600 dark:text-gray-300 mb-8">
+            <p className="text-lg lg:text-xl text-gray-600 dark:text-gray-300 mb-8">
               Access skilled developers for on-demand video calls at your convenience.
             </p>
 
-            <div className="relative mb-8 group">
-              <Search className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={20} />
+            {/* Search Bar */}
+            <div className="relative mb-8 max-w-2xl mx-auto">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={20} />
               <input
                 type="text"
                 placeholder="Search by skills, hourly rate, or availability..."
@@ -140,23 +142,25 @@ const Hero = () => {
               />
             </div>
 
+            {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href={'/ManageWallet'}>
-              <button className="px-8 py-3.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transform hover:scale-105 transition-all flex items-center justify-center shadow-lg hover:shadow-xl">
-                <Wallet size={20} className="mr-2" />
-                Manage Wallet
-                <ChevronRight size={20} className="ml-2" />
-              </button>
+              <Link href="/ManageWallet">
+                <button className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transform hover:scale-105 transition-all flex items-center justify-center shadow-lg hover:shadow-xl">
+                  <Wallet size={20} className="mr-2" />
+                  Manage Wallet
+                  <ChevronRight size={20} className="ml-2" />
+                </button>
               </Link>
-              <Link href={'/Developers'}>
-              <button className="px-8 py-3.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-600 dark:hover:border-blue-400 transform hover:scale-105 transition-all dark:text-white bg-white dark:bg-gray-800 shadow-sm hover:shadow-md">
-                Browse Developers
-              </button>
+              <Link href="/Developers">
+                <button className="w-full sm:w-auto px-8 py-3.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-600 dark:hover:border-blue-400 transform hover:scale-105 transition-all dark:text-white bg-white dark:bg-gray-800 shadow-sm hover:shadow-md">
+                  Browse Developers
+                </button>
               </Link>
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-20">
+          {/* Developer Cards Grid */}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 mb-20">
             {loading ? (
               <div className="col-span-full flex justify-center py-12">
                 <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -171,59 +175,57 @@ const Hero = () => {
               filteredDevs.map((dev) => (
                 <div
                   key={dev.id}
-                  className="group relative p-6 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 transition-all cursor-pointer bg-white dark:bg-gray-800/50 backdrop-blur-sm hover:shadow-xl"
+                  className="group relative p-4 sm:p-6 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 transition-all cursor-pointer bg-white dark:bg-gray-800/50 backdrop-blur-sm hover:shadow-xl"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-b from-blue-50/50 to-transparent dark:from-blue-900/20 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                  
-                  <div className="relative flex items-start gap-4">
-                    <div className="relative flex-shrink-0">
-                      <img
-                        src={dev.imageUrl || '/api/placeholder/56/56'}
-                        alt={dev.title}
-                        className="w-14 h-14 rounded-full object-cover ring-2 ring-gray-100 dark:ring-gray-700"
-                      />
-                      <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-gray-800 ${
-                        dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
-                      } ring-2 ring-white dark:ring-gray-800`} />
-                    </div>
-                    
-                    <div className="space-y-3 w-full">
-                      <div>
-                        <div className="flex justify-between items-start">
-                          <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                  <div className="relative flex flex-col gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="relative flex-shrink-0">
+                        <img
+                          src={dev.imageUrl || '/api/placeholder/56/56'}
+                          alt={dev.title}
+                          className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover ring-2 ring-gray-100 dark:ring-gray-700"
+                        />
+                        <div 
+                          className={`absolute bottom-0 right-0 w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 border-white dark:border-gray-800 ${
+                            dev.status === 'online' ? 'bg-green-500' : 'bg-yellow-500'
+                          } ring-2 ring-white dark:ring-gray-800`}
+                        />
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate">
                             {dev.title}
                           </h3>
-                          <span className="text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg">
+                          <span className="flex-shrink-0 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg">
                             ${dev.rate}/hr
                           </span>
                         </div>
-                        <p className="text-gray-600 dark:text-gray-300 text-sm mt-1">{dev.description}</p>
+                        <p className="text-gray-600 dark:text-gray-300 text-sm mt-1 line-clamp-2">
+                          {dev.description}
+                        </p>
                       </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1 bg-yellow-50 dark:bg-yellow-900/30 px-2 py-1 rounded-lg">
-                          <Star size={16} className="text-yellow-400 fill-current" />
-                          <span className="text-sm text-yellow-700 dark:text-yellow-300 font-medium">{dev.rating}</span>
-                        </div>
-                        <span className={`text-sm ml-auto px-2 py-1 rounded-lg font-medium ${
-                          dev.status === 'online' 
-                            ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300' 
-                            : 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-                        }`}>
-                          {dev.availabilityString}
-                        </span>
-                      </div>
+                    </div>
 
-                      <div className="flex flex-wrap gap-2">
-                        {dev.skills?.slice(0, 4).map((skill, index) => (
-                          <span
-                            key={index}
-                            className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                          >
-                            {skill}
-                          </span>
-                        ))}
-                      </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-sm px-2 py-1 rounded-lg font-medium ${
+                        dev.status === 'online' 
+                          ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300' 
+                          : 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                      }`}>
+                        {dev.availabilityString}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {dev.skills?.slice(0, 3).map((skill, index) => (
+                        <span
+                          key={index}
+                          className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                        >
+                          {skill}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -231,27 +233,28 @@ const Hero = () => {
             )}
           </div>
 
+          {/* Features Section */}
           <div className="border-t border-gray-200 dark:border-gray-800 pt-16">
             <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 mb-4">
+              <h2 className="text-2xl sm:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 mb-4">
                 Why Choose BookMyDev?
               </h2>
-              <p className="text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+              <p className="text-gray-600 dark:text-gray-300 max-w-2xl mx-auto px-4">
                 Connect with skilled developers through our professional platform designed for seamless video consultations and technical discussions.
               </p>
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-8">
               {features.map((feature, index) => (
                 <div 
                   key={index} 
                   className="text-center p-6 rounded-xl bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 transition-all hover:shadow-lg"
                 >
-                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/50 mb-4 group-hover:scale-110 transition-transform">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/50 mb-4">
                     {feature.icon}
                   </div>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{feature.title}</h3>
-                  <p className="text-gray-600 dark:text-gray-300">{feature.description}</p>
+                  <p className="text-gray-600 dark:text-gray-300 text-sm">{feature.description}</p>
                 </div>
               ))}
             </div>
