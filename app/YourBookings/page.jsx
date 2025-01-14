@@ -76,31 +76,14 @@ const YourBookings = () => {
   const [activeChatBooking, setActiveChatBooking] = useState(null);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [maticBalance, setMaticBalance] = useState(null);
-  const upcomingBookings = bookings.filter(booking => new Date(booking.date) >= new Date());
-  const pastBookings = bookings.filter(booking => new Date(booking.date) < new Date());
+  const [currentAccount, setCurrentAccount] = useState(null);
   const [developerServices, setDeveloperServices] = useState({});
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const [roomId, setRoomId] = useState(null); // Changed from setCurrentRoomId
+  const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false);
 
-  useEffect(() => {
-    fetchBookings();
-    checkWalletConnection();
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      setIsAuthenticated(!!user);
-      setAuthChecked(true);
-      if (user) {
-        setupFirestoreListeners(user.uid);
-      } else {
-        router.push('/YourBookings');
-      }
-    });
-
-    return () => unsubscribe();
-  }, [router]);
-
+  // Move the setupFirestoreListeners definition before its usage
   const setupFirestoreListeners = useCallback((userId) => {
     try {
       const bookingsRef = collection(db, 'bookings');
@@ -138,6 +121,25 @@ const YourBookings = () => {
       setError('Failed to initialize bookings. Please refresh the page.');
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setIsAuthenticated(!!user);
+      setAuthChecked(true);
+      if (user) {
+        setupFirestoreListeners(user.uid);
+      } else {
+        router.push('/YourBookings');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router, setupFirestoreListeners]);
+
+  useEffect(() => {
+    fetchBookings();
+    checkWalletConnection();
   }, []);
 
   const isChatAvailable = (bookingDate, timeSlot) => {
@@ -181,6 +183,35 @@ const YourBookings = () => {
     }, { active: [], upcoming: [], past: [] });
   };
 
+  const handleEndMeeting = async () => {
+    try {
+      if (!activeSession?.id) {
+        setIsVideoDialogOpen(false);
+        setRoomId(null);
+        setActiveSession(null);
+        return;
+      }
+      const bookingRef = doc(db, 'bookings', activeSession.id);
+      await updateDoc(bookingRef, {
+        sessionStatus: 'completed',
+        endTime: new Date().toISOString()
+      });
+      setShowVideoConference(false);
+      setIsVideoDialogOpen(false);
+      setRoomId(null);
+      setActiveSession(null);
+
+      await fetchBookings();
+
+    } catch (error) {
+      console.error('Error ending meeting:', error);
+      
+      setShowVideoConference(false);
+      setIsVideoDialogOpen(false);
+      setRoomId(null);
+      setActiveSession(null);
+    }
+  };
 
   const checkNetwork = async () => {
     try {
@@ -257,31 +288,30 @@ const YourBookings = () => {
     try {
       if (!window.ethereum) {
         setError('Please install MetaMask or another Web3 wallet');
-        return;
+        return false;
       }
-
+  
       const accounts = await window.ethereum.request({
         method: 'eth_requestAccounts'
       });
-
-      const isCorrectNetwork = await checkNetwork();
-      if (!isCorrectNetwork) {
-        return;
+  
+      if (!accounts || accounts.length === 0) {
+        setError('No accounts found. Please check your wallet.');
+        return false;
       }
-
+  
       setCurrentAccount(accounts[0]);
       setWalletConnected(true);
-
+  
       const provider = new BrowserProvider(window.ethereum);
       const balance = await provider.getBalance(accounts[0]);
       setMaticBalance(ethers.formatEther(balance));
-
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('chainChanged', handleChainChanged);
-
+  
+      return true;
     } catch (error) {
       console.error('Error connecting wallet:', error);
-      setError('Failed to connect wallet. Please try again.');
+      setError(error.message || 'Failed to connect wallet. Please try again.');
+      return false;
     }
   };
 
@@ -302,56 +332,101 @@ const YourBookings = () => {
 
   const processPayment = async (booking) => {
     try {
-      if (!walletConnected) {
-        await connectWallet();
+      setProcessingPayment(true);
+      setError(null);
+      if (!window.ethereum) {
+        setError('Please install MetaMask to make payments');
+        setProcessingPayment(false);
         return;
       }
 
-      setProcessingPayment(true);
-      setError(null);
-
+      let account = currentAccount;
+      if (!account) {
+        const accounts = await window.ethereum.request({
+          method: 'eth_requestAccounts'
+        });
+        
+        if (!accounts || accounts.length === 0) {
+          setError('Please connect your wallet first');
+          setProcessingPayment(false);
+          return;
+        }
+        
+        account = accounts[0];
+        setCurrentAccount(account);
+        setWalletConnected(true);
+      }
       const isCorrectNetwork = await checkNetwork();
       if (!isCorrectNetwork) {
+        setProcessingPayment(false);
+        return;
+      }
+  
+      const developerWallet = developerServices[booking.developerId]?.walletInfo?.address;
+      
+      if (!developerWallet || !ethers.isAddress(developerWallet)) {
+        setError('Invalid developer wallet address');
+        console.error('Developer wallet info:', {
+          developerId: booking.developerId,
+          walletInfo: developerServices[booking.developerId]?.walletInfo
+        });
         setProcessingPayment(false);
         return;
       }
 
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
+      const signerAddress = await signer.getAddress();
 
       const maticAmount = (booking.totalCost / MATIC_TO_USD).toFixed(6);
       const maticWei = ethers.parseEther(maticAmount);
-
-      const balance = await provider.getBalance(currentAccount);
+  
+      const balance = await provider.getBalance(signerAddress);
       if (balance < maticWei) {
-        setError('Insufficient MATIC balance');
+        setError(`Insufficient MATIC balance. You need ${ethers.formatEther(maticWei)} MATIC`);
         setProcessingPayment(false);
         return;
       }
 
       const tx = await signer.sendTransaction({
-        to: booking.developerWallet,
+        to: developerWallet,
         value: maticWei,
+        gasLimit: 21000
       });
-
+  
       const receipt = await tx.wait();
-
+  
       await updateDoc(doc(db, 'bookings', booking.id), {
         paymentStatus: 'completed',
         transactionHash: receipt.hash,
         paymentTimestamp: new Date().toISOString()
       });
-
+  
       await fetchBookings();
-
+      setMaticBalance(ethers.formatEther(await provider.getBalance(signerAddress)));
       setError(null);
-
+  
     } catch (error) {
       console.error('Payment error:', error);
-      setError(error.message || 'Payment failed. Please try again.');
+      if (error.message.includes('user rejected')) {
+        setError('Transaction was rejected. Please try again.');
+      } else {
+        setError(error.message || 'Payment failed. Please try again.');
+      }
     } finally {
       setProcessingPayment(false);
     }
+  };
+  
+
+  const handleJoinMeeting = (booking) => {
+    if (!booking.roomId) {
+      setError("Meeting room not found. Please contact support.");
+      return;
+    }
+    setActiveSession(booking);
+    setRoomId(booking.roomId);
+    setShowVideoConference(true);
   };
 
   const checkWalletConnection = async () => {
@@ -410,7 +485,6 @@ const YourBookings = () => {
     }
   };
 
-  // Update fetchDeveloperServices with better error handling
   const fetchDeveloperServices = async (developerIds) => {
     try {
       const servicesRef = collection(db, 'services');
@@ -420,17 +494,17 @@ const YourBookings = () => {
       
       const services = {};
       querySnapshot.forEach((doc) => {
-        services[doc.data().userId] = doc.data();
+        const data = doc.data();
+        services[data.userId] = {
+          ...data,
+          walletInfo: data.walletInfo || {}
+        };
       });
       
       setDeveloperServices(services);
     } catch (err) {
       console.error('Error fetching developer services:', err);
-      if (err.code === 'permission-denied') {
-        setError('Unable to load developer information. Please check your permissions.');
-      } else {
-        setError('Failed to load developer information. Please try again later.');
-      }
+      setError('Failed to load developer information. Please try again later.');
     }
   };
 
@@ -725,27 +799,25 @@ const YourBookings = () => {
           </CardContent>
 
           {isActive && booking.paymentStatus === 'completed' && (
-            <CardFooter className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 p-6">
-            <div className="flex gap-4 w-full">
-              {renderChatButton(booking)}
-              <Button 
-                onClick={() => {
-                  setActiveSession(booking);
-                  setShowVideoConference(true);
-                }}
-                className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 h-12"
-              >
-                <Video className="w-5 h-5 mr-2" />
-                Join Video Session Now
-                <ArrowRight className="w-5 h-5 ml-2" />
-              </Button>
-            </div>
-            </CardFooter>
-          )}
-        </Card>
+    <CardFooter className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 p-6">
+      <div className="flex gap-4 w-full">
+        {renderChatButton(booking)}
+        <Button 
+          onClick={() => handleJoinMeeting(booking)}
+          className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 h-12"
+        >
+          <Video className="w-5 h-5 mr-2" />
+          Join Video Session Now
+          <ArrowRight className="w-5 h-5 ml-2" />
+        </Button>
+      </div>
+    </CardFooter>
+  )}
+</Card>
       </motion.div>
     );
   };
+
 
   if (!authChecked) {
     return (
@@ -939,8 +1011,10 @@ const YourBookings = () => {
           {activeSession && (
             <div className="flex-1 min-h-0">
               <VideoConference
+                roomId={roomId}
                 sessionId={activeSession.id}
                 participantName={auth.currentUser?.displayName || 'User'}
+                onLeave={handleEndMeeting}
               />
             </div>
           )}

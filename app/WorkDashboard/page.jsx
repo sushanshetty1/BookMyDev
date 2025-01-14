@@ -568,44 +568,36 @@ const DeveloperDashboard = () => {
       </div>
       
       <Dialog 
-        open={isChatDialogOpen} 
-        onOpenChange={setIsChatDialogOpen}
-        modal={true}
-      >
-        <DialogContent className="max-w-[90vw] w-[500px] h-[80vh] p-0 overflow-hidden">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Chat</DialogTitle>
-          </DialogHeader>
-          {activeChatBooking && (
-            <div className="h-full">
-              <ChatComponent
-                bookingId={activeChatBooking.id}
-                developerId={auth.currentUser?.uid}
-                developerName={auth.currentUser?.displayName}
-                developerImage={auth.currentUser?.photoURL}
-              />
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+  open={isChatDialogOpen} 
+  onOpenChange={setIsChatDialogOpen}
+  modal={true}
+>
+  <DialogContent className="w-full max-w-[500px] max-h-[90vh] p-1 flex flex-col rounded-lg shadow-lg bg-white">
+    {/* Dialog Header */}
+    <DialogHeader className="px-3 py-2 border-b border-gray-200 flex flex-col gap-2">
+      <DialogTitle className="text-lg font-semibold text-gray-800">
+        Chat with {activeChatBooking?.userName}
+      </DialogTitle>
+      <DialogDescription className="text-sm text-gray-500">
+        Booking: {activeChatBooking?.serviceTitle}
+      </DialogDescription>
+    </DialogHeader>
 
+    {/* Chat Body */}
+    {activeChatBooking && (
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <ChatComponent
+          bookingId={activeChatBooking.id}
+          developerId={auth.currentUser?.uid}
+          developerName={auth.currentUser?.displayName}
+          developerImage={auth.currentUser?.photoURL}
+          className="flex-1 flex flex-col overflow-y-auto p-4"
+        />
+      </div>
+    )}
+  </DialogContent>
+</Dialog>
 
-      {/* Video Dialog */}
-      <Dialog open={isVideoDialogOpen} onOpenChange={setIsVideoDialogOpen}>
-        <DialogContent className="sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Live Consultation Session</DialogTitle>
-          </DialogHeader>
-          <div className="mt-4">
-            <VideoConference
-              roomId={currentRoomId}
-              participantName={auth.currentUser?.displayName || 'Developer'}
-              isDeveloper={true}
-              onLeave={handleEndMeeting}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   </div>
   </div>
