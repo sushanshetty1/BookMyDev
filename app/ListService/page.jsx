@@ -10,6 +10,8 @@ import { Check, X, Wallet, Upload, Image as ImageIcon, AlertCircle, Clock, Copy 
 import { auth, db } from '../../firebase';
 import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
+import { redirect } from 'next/dist/server/api-utils';
+import { Router } from 'next/router';
 
 const ListService = () => {
   const [authChecked, setAuthChecked] = useState(false);
@@ -134,6 +136,12 @@ const ListService = () => {
       </div>
     );
   }
+
+  const handleWalletConnect = async () => {
+        window.open("/ManageWallet", "_blank");
+};
+
+
 
   const uploadImageToCloudinary = async (file) => {
     try {
