@@ -41,7 +41,6 @@ const Hero = () => {
     }
   }, []);
 
-  // Enhanced search functionality
   useEffect(() => {
     const searchTerms = searchQuery.toLowerCase().split(' ');
     const filtered = featuredDevs.filter(dev => {
@@ -60,39 +59,44 @@ const Hero = () => {
 
   const isAvailableNow = (availability) => {
     if (!availability) return false;
-    
+  
     const now = new Date();
-    const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-    const time = now.getHours().toString().padStart(2, '0') + ':' + 
-                 now.getMinutes().toString().padStart(2, '0');
-    
+    const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const currentTime = now.toTimeString().slice(0, 5);
+  
+    console.log(`Today is ${day} and the current time is ${currentTime}`);
+  
     const dayAvailability = availability[day];
-    if (!dayAvailability?.isAvailable) return false;
-    
-    return dayAvailability.slots.some(slot => 
-      time >= slot.start && time <= slot.end
-    );
+    if (!dayAvailability || !dayAvailability.isAvailable) return false;
+  
+    return dayAvailability.slots.some(({ start, end }) => {
+      const isWithinSlot = currentTime >= start && currentTime <= end;
+      console.log(`Checking slot ${start} - ${end} for current time ${currentTime}: ${isWithinSlot}`);
+      return isWithinSlot;
+    });
   };
-
+  
   const getAvailabilityString = (availability) => {
     if (!availability) return "Not Available";
-    
+  
     const now = new Date();
-    const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-    
+    const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const currentTime = now.toTimeString().slice(0, 5);
+
     if (isAvailableNow(availability)) {
       return "Available Now";
     }
-
+  
     const todaySlots = availability[day]?.slots || [];
-    const time = now.getHours().toString().padStart(2, '0') + ':' + 
-                 now.getMinutes().toString().padStart(2, '0');
-    
-    const laterToday = todaySlots.some(slot => slot.start > time);
-    if (laterToday) return "Available Today";
-    
+    const hasAvailableSlotLaterToday = todaySlots.some(slot => slot.start > currentTime);
+    if (hasAvailableSlotLaterToday) {
+      return "Available Today";
+    }
+  
     return "Available This Week";
   };
+  
+  
 
   const features = [
     {

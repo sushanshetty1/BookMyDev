@@ -74,72 +74,57 @@ const DevelopersPage = () => {
   }, []);
 
 
-const isAvailableNow = (availability) => {
-  if (!availability) return false;
+  const isAvailableNow = (availability) => {
+    if (!availability) return false;
   
-  const now = new Date();
-  const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-  const time = now.getHours().toString().padStart(2, '0') + ':' + 
-               now.getMinutes().toString().padStart(2, '0');
+    const now = new Date();
+    const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();  // Use 'long' to get full day name
+    const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    
+    const dayAvailability = availability[day];
+    if (!dayAvailability?.isAvailable) return false;
+    
+    return dayAvailability.slots.some(slot => 
+      time >= slot.start && time <= slot.end
+    );
+  };
   
-  const dayAvailability = availability[day];
-  if (!dayAvailability?.isAvailable) return false;
+  const getAvailabilityString = (availability) => {
+    if (!availability) return "Not Available";
   
-  return dayAvailability.slots.some(slot => 
-    time >= slot.start && time <= slot.end
-  );
-};
-
-const getAvailabilityString = (availability) => {
-  if (!availability) return "Not Available";
+    const now = new Date();
+    const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
   
-  const now = new Date();
-  const day = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    if (isAvailableNow(availability)) {
+      return "Available Now";
+    }
   
-  if (isAvailableNow(availability)) {
-    return "Available Now";
-  }
-
-  const todaySlots = availability[day]?.slots || [];
-  const time = now.getHours().toString().padStart(2, '0') + ':' + 
-               now.getMinutes().toString().padStart(2, '0');
+    const todaySlots = availability[day]?.slots || [];
+    const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    
+    const laterToday = todaySlots.some(slot => slot.start > time);
+    if (laterToday) return "Available Today";
+    
+    return "Available This Week";
+  };
   
-  const laterToday = todaySlots.some(slot => slot.start > time);
-  if (laterToday) return "Available Today";
-  
-  return "Available This Week";
-};
-
-  const allSkills = useMemo(() => {
-    const skillsSet = new Set();
-    developers.forEach(dev => {
-      if (dev.skills) {
-        dev.skills.forEach(skill => skillsSet.add(skill));
-      }
-    });
-    return Array.from(skillsSet).sort();
-  }, [developers]);
 
   const filteredDevelopers = useMemo(() => {
     return developers
       .filter(dev => {
-        // Search query filter
         const searchLower = searchQuery.toLowerCase();
         const matchesSearch = 
           dev.title?.toLowerCase().includes(searchLower) ||
           dev.description?.toLowerCase().includes(searchLower) ||
           dev.skills?.some(skill => skill.toLowerCase().includes(searchLower));
 
-        // Skills filter
         const matchesSkills = 
           selectedSkills.length === 0 ||
           selectedSkills.every(skill => dev.skills?.includes(skill));
 
-        // Rate range filter
         const matchesRate = 
           dev.rate >= rateRange[0] && dev.rate <= rateRange[1];
 
-        // Availability filter
         const matchesAvailability = 
           availability === 'all' ||
           (availability === 'now' && dev.availabilityString === 'Available Now') ||
